@@ -1164,10 +1164,24 @@ One implementation note: `matches_intext_style` and `find_style_violations` now 
 
 I re-ran the full test suite (both citation styles) after the split — output is identical to before.
 
-Atttached:
+Attached:
 
 - `check_refs.py` _(version as of this commit)_
 - `qdvcrc_analysis.py` _(version as of this commit)_
 - `qdvcrc_parsing.py` _(version as of this commit)_
 - `qdvcrc_report.py` _(version as of this commit)_
 
+## 9. User request
+
+Generate an overview for my README.md with the following:
+
+- For each Python file, list each function and provide a description of its purpose (based on the existing comments in the codebase)
+- Other useful information for someone who needs to maintain this codebase (2-3 dotpoints)
+
+## 10. LLM response
+
+The README covers each of the four files with a function table built from the existing docstrings, plus three maintenance notes: the co-location requirement for the `qdvcrc_*` modules, the config-stays-in-`check_refs.py` pattern (and why), and a heads-up about the name+year matching approach being a potential source of false matches for same-surname/same-year authors.
+
+Attached:
+
+- `technical-info-from-claude.md` _(version as of this commit)_

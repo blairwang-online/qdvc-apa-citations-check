@@ -28,6 +28,10 @@ What is not checked:
 - Whether your references are intellectually and scholastically appropriate
 - Whether your paper is any good..
 
+## Maintaining the codebase
+
+See [docs/technical-info-from-claude.md](docs/technical-info-from-claude.md)
+
 ## Q&A
 
 **Why did you make this?** I needed to quickly check the manual referencing for a paper that I'm working on.
