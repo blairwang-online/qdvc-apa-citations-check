@@ -1185,3 +1185,15 @@ The README covers each of the four files with a function table built from the ex
 Attached:
 
 - `technical-info-from-claude.md` _(version as of this commit)_
+
+## 11. User request
+
+Update the tables so that the example inputs and outputs are provided for each function (as appears in codebase comments)
+
+## 12. LLM response
+
+Each table now has an **Example Input** and **Example Output** column, pulled directly from the `Example:` blocks in the existing docstrings. Multi-part inputs (like the dicts/lists passed to the analysis functions) use `<br>` line breaks within the cell so they stay readable in a rendered table.
+
+Attached:
+
+- `technical-info-from-claude.md` _(version as of this commit)_
