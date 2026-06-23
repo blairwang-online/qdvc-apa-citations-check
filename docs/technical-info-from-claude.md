@@ -1,11 +1,12 @@
 # Technical info provided by Claude
 
-**check_refs — APA Citation Checker**
+**check_refs — APA Citation Checker** 
 
 Audits a research paper (plain text) for APA citation consistency:
 1. Inline citations with no matching reference-list entry
 2. Reference-list entries with no matching inline citation
 3. Inline citations that don't follow the configured comma style
+4. Reference-list entries that aren't in alphabetical order
 
 ## File Overview
 
@@ -41,6 +42,8 @@ Functions that analyze the data parsed by `qdvcrc_parsing.py`: cross-matching in
 | `find_missing_and_used_references(raw_inline_citations, references_by_key)` | Cross-references inline citations against the reference list. Returns inline citation text with no matching reference-list entry, and reference-list lines matched by at least one inline citation. | `raw_inline_citations = {"Smith, 2026": [("Smith","2026")], "Nguyen, 2025": [("Nguyen","2025")]}`<br>`references_by_key = {("Smith","2026"): ["Smith, J. (2026). A study of things."]}` | `({"Nguyen, 2025"}, {"Smith, J. (2026). A study of things."})` |
 | `find_unused_references(raw_reference_list, used_reference_entries)` | Returns reference-list lines that no inline citation matched. | `raw_reference_list = ["Smith, J. (2026). A study of things.", "Patel, R. (2021). Unused reference."]`<br>`used_reference_entries = {"Smith, J. (2026). A study of things."}` | `["Patel, R. (2021). Unused reference."]` |
 | `find_style_violations(raw_inline_citations, uses_comma_intext)` | Returns a sorted list of inline citations that don't conform to the given comma style. | `raw_inline_citations = {"Smith, 2026": [("Smith","2026")], "Jones 2024": [("Jones","2024")]}`, `True` | `["Jones 2024"]` |
+| `get_reference_sort_key(line)` | Returns the lowercased author-name portion of a reference-list line, used to check alphabetical ordering. APA reference entries start with the first author's surname before the first comma. | `"Smith, J. (2026). A study of things."` | `"smith"` |
+| `find_reference_order_violations(raw_reference_list)` | Returns the reference-list lines that are out of alphabetical order relative to the entry immediately before them, based on each entry's leading author surname (the text before the first comma). | `raw_reference_list = ["Smith, J. (2026). A study of things.", "Jones, A. (2024). Another study."]` | `["Jones, A. (2024). Another study."]` |
 
 ### `qdvcrc_report.py`
 
@@ -48,10 +51,11 @@ Formats and prints the final APA citation audit report.
 
 | Function | Description | Example Input | Example Output |
 |---|---|---|---|
-| `print_report(missing_in_references, unused_references, style_violations, uses_comma_intext)` | Prints the formatted three-section APA citation audit report to stdout. Returns nothing. | `missing_in_references = {"Nguyen, 2025"}`<br>`unused_references = ["Patel, R. (2021). Unused reference."]`<br>`style_violations = ["Jones 2024"]`<br>`uses_comma_intext = True` | *(printed)*<br>`--- APA CITATION AUDIT REPORT ---`<br>`1. ... missing: - (Nguyen, 2025)`<br>`2. ... unused: - Patel, R. (2021). Unused reference.`<br>`3. ... style: - (Jones 2024)` |
+| `print_report(missing_in_references, unused_references, style_violations, order_violations, uses_comma_intext)` | Prints the formatted four-section APA citation audit report to stdout. Returns nothing. | `missing_in_references = {"Nguyen, 2025"}`<br>`unused_references = ["Patel, R. (2021). Unused reference."]`<br>`style_violations = ["Jones 2024"]`<br>`order_violations = ["Jones, A. (2024). Another study."]`<br>`uses_comma_intext = True` | *(printed)*<br>`--- APA CITATION AUDIT REPORT ---`<br>`1. ... missing: - (Nguyen, 2025)`<br>`2. ... unused: - Patel, R. (2021). Unused reference.`<br>`3. ... style: - (Jones 2024)`<br>`4. ... order: - Jones, A. (2024). Another study.` |
 
 ## Maintenance Notes
 
 - **All four files must stay in the same directory.** `check_refs.py` imports directly from `qdvcrc_parsing`, `qdvcrc_analysis`, and `qdvcrc_report` by module name (no package structure), so they need to be co-located to run.
 - **Configuration lives in `check_refs.py`, not the `qdvcrc_*` modules.** `USES_COMMA_INTEXT` and `whitelist` are defined in the main file and passed into the helper functions as parameters (e.g. `find_style_violations(raw_inline_citations, USES_COMMA_INTEXT)`). This avoids a circular import back into the main file — if you add new configuration, follow the same pattern rather than importing it into a `qdvcrc_*` module.
 - **Citation/reference matching is name+year based, not exact-text based.** Both inline citations and reference entries are reduced to `(Author, Year)` key tuples before comparison, so the checker is tolerant of minor formatting differences but can also produce false matches if two different authors share a surname and publication year.
+- **Alphabetical-order checking compares each entry only to the one immediately before it**, using the surname before the first comma as the sort key. It flags the entry that breaks the sequence, not every entry that's technically misplaced — so a single line moved out of place will produce one violation, but it won't independently verify the full list is sorted from scratch.

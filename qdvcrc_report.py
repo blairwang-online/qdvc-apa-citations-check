@@ -6,9 +6,10 @@ check_refs.py.
 """
 
 
-def print_report(missing_in_references, unused_references, style_violations, uses_comma_intext):
+def print_report(missing_in_references, unused_references, style_violations,
+                  order_violations, uses_comma_intext):
     """
-    Prints the formatted three-section APA citation audit report to stdout.
+    Prints the formatted four-section APA citation audit report to stdout.
     Returns nothing.
 
     Example:
@@ -16,6 +17,7 @@ def print_report(missing_in_references, unused_references, style_violations, use
             missing_in_references = {"Nguyen, 2025"}
             unused_references = ["Patel, R. (2021). Unused reference."]
             style_violations = ["Jones 2024"]
+            order_violations = ["Jones, A. (2024). Another study."]
             uses_comma_intext = True
         Output (printed):
             --- APA CITATION AUDIT REPORT ---
@@ -28,6 +30,9 @@ def print_report(missing_in_references, unused_references, style_violations, use
 
             3. Inline citations not matching the configured style (Smith, 2026):
               - (Jones 2024)
+
+            4. References not in alphabetical order:
+              - Jones, A. (2024). Another study.
     """
     style_example = "(Smith, 2026)" if uses_comma_intext else "(Smith 2026)"
 
@@ -53,3 +58,10 @@ def print_report(missing_in_references, unused_references, style_violations, use
             print(f"  - ({ref})")
     else:
         print("  None! All inline citations consistently use the configured style.")
+
+    print("\n4. References not in alphabetical order:")
+    if order_violations:
+        for ref in order_violations:
+            print(f"  - {ref}")
+    else:
+        print("  None! The Reference list is in alphabetical order.")

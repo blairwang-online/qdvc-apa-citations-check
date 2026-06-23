@@ -15,6 +15,7 @@ from qdvcrc_analysis import (
     find_missing_and_used_references,
     find_unused_references,
     find_style_violations,
+    find_reference_order_violations,
 )
 from qdvcrc_report import print_report
 
@@ -55,8 +56,15 @@ def check_citations(file_path):
     )
     unused_references = find_unused_references(raw_reference_list, used_reference_entries)
     style_violations = find_style_violations(raw_inline_citations, USES_COMMA_INTEXT)
+    order_violations = find_reference_order_violations(raw_reference_list)
 
-    print_report(missing_in_references, unused_references, style_violations, USES_COMMA_INTEXT)
+    print_report(
+        missing_in_references,
+        unused_references,
+        style_violations,
+        order_violations,
+        USES_COMMA_INTEXT,
+    )
 
 
 # Example usage (replace 'check_refs_document.txt' with your file)

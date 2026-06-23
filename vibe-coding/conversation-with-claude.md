@@ -1197,3 +1197,37 @@ Each table now has an **Example Input** and **Example Output** column, pulled di
 Attached:
 
 - `technical-info-from-claude.md` _(version as of this commit)_
+
+## 13. User request
+
+Update the codebase to check if reference list is alphabetically sorted. If required, update the markdown documentation.
+
+## 14. LLM response
+
+Now let's add the new alphabetical-order check functions:
+
+Now update `print_report` in `qdvcrc_report.py` to include the new section:
+
+Now update `check_refs.py` to call the new function and pass it through:Now let's test the full updated pipeline:
+
+It correctly flags `Jones` as out of order (since `Smith` comes first but alphabetically `J` < `S`). Let's also confirm a properly-sorted list passes cleanly:
+
+Works correctly in both cases. Now let's update the README to reflect the new function and the updated `print_report` signature/example:
+
+Now let's copy everything to outputs and present the final set:Added the alphabetical-order check and wired it through the pipeline:
+
+- **`qdvcrc_analysis.py`** — two new functions: `get_reference_sort_key()` (pulls the surname before the first comma, lowercased) and `find_reference_order_violations()` (flags entries that come before the previous entry alphabetically).
+- **`qdvcrc_report.py`** — `print_report()` now takes an `order_violations` parameter and prints a 4th section, "References not in alphabetical order."
+- **`check_refs.py`** — calls `find_reference_order_violations()` and passes the result through to the report.
+
+I tested both an out-of-order list (correctly flagged `Jones` for coming after `Smith`) and a properly-sorted one (clean pass message).
+
+**README.md** updated to match: the intro now lists 4 checks, the `qdvcrc_analysis.py` table has rows for both new functions, the `print_report` row reflects its new signature/output, and I added a maintenance note explaining that the order check only compares each entry to the one immediately before it — so it flags the entry that breaks the sequence rather than independently re-verifying the whole list is sorted.
+
+Attached:
+
+- `check_refs.py` _(version as of this commit)_
+- `qdvcrc_analysis.py` _(version as of this commit)_
+- `qdvcrc_parsing.py` _(version as of this commit)_
+- `qdvcrc_report.py` _(version as of this commit)_
+- `technical-info-from-claude.md` _(version as of this commit)_

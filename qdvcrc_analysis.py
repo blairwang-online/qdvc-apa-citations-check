@@ -109,3 +109,42 @@ def find_style_violations(raw_inline_citations, uses_comma_intext):
         if keys and not matches_intext_style(raw_cite, uses_comma_intext)
     ]
     return sorted(violations)
+
+
+def get_reference_sort_key(line):
+    """
+    Returns the lowercased author-name portion of a reference-list line,
+    used to check alphabetical ordering. APA reference entries start with
+    the first author's surname before the first comma.
+
+    Example:
+        Input:  "Smith, J. (2026). A study of things."
+        Output: "smith"
+    """
+    author_part = line.split(',')[0].strip()
+    return author_part.lower()
+
+
+def find_reference_order_violations(raw_reference_list):
+    """
+    Returns the reference-list lines that are out of alphabetical order
+    relative to the entry immediately before them, based on each entry's
+    leading author surname (the text before the first comma).
+
+    Example:
+        Input:
+            raw_reference_list = [
+                "Smith, J. (2026). A study of things.",
+                "Jones, A. (2024). Another study.",
+            ]
+        Output:
+            ["Jones, A. (2024). Another study."]
+    """
+    violations = []
+    for i in range(1, len(raw_reference_list)):
+        previous_key = get_reference_sort_key(raw_reference_list[i - 1])
+        current_key = get_reference_sort_key(raw_reference_list[i])
+        if current_key < previous_key:
+            violations.append(raw_reference_list[i])
+
+    return violations
