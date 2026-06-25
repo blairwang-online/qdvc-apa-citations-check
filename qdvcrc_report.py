@@ -10,9 +10,11 @@ def print_report(missing_in_references, unused_references, style_violations,
                  order_violations, uses_comma_intext,
                  intext_separator_violations=None,
                  reference_separator_violations=None,
-                 intext_separator="and", reflist_separator="and"):
+                 intext_separator="and", reflist_separator="and",
+                 volume_issue_violations=None,
+                 volume_issue_format="comma"):
     """
-    Prints the formatted six-section APA citation audit report to stdout.
+    Prints the formatted seven-section APA citation audit report to stdout.
     Returns nothing.
 
     Example:
@@ -26,6 +28,8 @@ def print_report(missing_in_references, unused_references, style_violations,
             reference_separator_violations = ["Brown C and Lee D (2019) ..."]
             intext_separator = "and"
             reflist_separator = "&"
+            volume_issue_violations = ["Jones B (2019) Other. Journal (8:1)"]
+            volume_issue_format = "comma"
         Output (printed):
             --- APA CITATION AUDIT REPORT ---
 
@@ -46,9 +50,13 @@ def print_report(missing_in_references, unused_references, style_violations,
 
             6. References not using the configured author separator ("&"):
               - Brown C and Lee D (2019) ...
+
+            7. References not using the configured volume/issue format ("comma"):
+              - Jones B (2019) Other. Journal (8:1)
     """
     intext_separator_violations = intext_separator_violations or []
     reference_separator_violations = reference_separator_violations or []
+    volume_issue_violations = volume_issue_violations or []
     style_example = "(Smith, 2026)" if uses_comma_intext else "(Smith 2026)"
 
     print("--- APA CITATION AUDIT REPORT ---")
@@ -98,3 +106,12 @@ def print_report(missing_in_references, unused_references, style_violations,
     else:
         print("  None! All references consistently use the configured "
               "author separator.")
+
+    print(f"\n7. References not using the configured volume/issue format "
+          f"(\"{volume_issue_format}\"):")
+    if volume_issue_violations:
+        for ref in volume_issue_violations:
+            print(f"  - {ref}")
+    else:
+        print("  None! All references consistently use the configured "
+              "volume/issue format.")

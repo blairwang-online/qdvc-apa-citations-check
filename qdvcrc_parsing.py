@@ -122,6 +122,23 @@ def get_reference_author_prefix(line):
     return line.split(ref_year_match.group(0))[0]
 
 
+def get_reference_post_year(line):
+    """
+    Returns the portion of a reference-list line after the year parenthesis
+    (title, journal, volume/issue, etc.), or an empty string if no year is
+    found. Used to inspect the journal volume/issue format without the
+    author-year region interfering.
+
+    Example:
+        Input:  "Smith A (2020) A study. Journal of Things, 16(2):100-110"
+        Output: " A study. Journal of Things, 16(2):100-110"
+    """
+    ref_year_match = REFERENCE_YEAR_PATTERN.search(line)
+    if not ref_year_match:
+        return ''
+    return line[ref_year_match.end():]
+
+
 def extract_narrative_citations(line):
     """
     Finds narrative (in-prose) citations, where author names appear in the

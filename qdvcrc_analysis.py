@@ -9,7 +9,11 @@ checking in-text style consistency. Imported by check_refs.py.
 import re
 import unicodedata
 
-from qdvcrc_parsing import YEAR_PATTERN, get_reference_author_prefix
+from qdvcrc_parsing import (
+    YEAR_PATTERN,
+    get_reference_author_prefix,
+    get_reference_post_year,
+)
 
 # Detects the two author-separator forms used between names in a citation or
 # reference entry. The word "and" is matched only as a whole word, so it does
@@ -24,6 +28,22 @@ AMPERSAND_SEPARATOR_PATTERN = re.compile(r'&')
 _WRONG_SEPARATOR_PATTERN = {
     'and': AMPERSAND_SEPARATOR_PATTERN,
     '&': AND_SEPARATOR_PATTERN,
+}
+
+# Detects the two journal volume/issue formats in a reference entry:
+#   "parenthetical" -> volume and issue together in one paren: "(16:2)"
+#   "comma"         -> bare volume followed by issue in parens: "16(2)",
+#                      "16 (2)", or ", 16(2)" (the distinguishing feature is
+#                      that the issue paren has no colon-joined volume).
+PARENTHETICAL_VOLUME_ISSUE_PATTERN = re.compile(r'\(\s*\d+\s*:\s*\d+\s*\)')
+COMMA_VOLUME_ISSUE_PATTERN = re.compile(r'\b\d+\s*\(\s*\d+\s*\)')
+
+# Maps a configured volume/issue format to (pattern_for_this_format,
+# pattern_for_the_other_format). A line is flagged only when it matches the
+# *other* format, so entries with no recognizable volume/issue are left alone.
+_VOLUME_ISSUE_PATTERNS = {
+    'comma': (COMMA_VOLUME_ISSUE_PATTERN, PARENTHETICAL_VOLUME_ISSUE_PATTERN),
+    'parenthetical': (PARENTHETICAL_VOLUME_ISSUE_PATTERN, COMMA_VOLUME_ISSUE_PATTERN),
 }
 
 # Latin letters that have no canonical Unicode decomposition into a base
@@ -264,3 +284,37 @@ def find_reference_separator_violations(raw_reference_list, reflist_separator):
         ref for ref in raw_reference_list
         if wrong_pattern.search(get_reference_author_prefix(ref))
     ]
+
+
+def find_volume_issue_violations(raw_reference_list, volume_issue_format):
+    """
+    Returns the reference-list lines whose journal volume/issue uses the wrong
+    format, given the configured format ("comma" for "Journal, 16(2)" or
+    "parenthetical" for "Journal (16:2)"). Only the text after the year is
+    inspected, and a line is flagged only when it matches the *other* format;
+    entries with no recognizable volume/issue (e.g. books) are never flagged.
+
+    Example:
+        Input:
+            raw_reference_list = [
+                "Smith A (2020) A study. Journal of Things, 16(2):100-110",
+                "Jones B (2019) Other. Journal of Things (8:1):5-9",
+            ], "comma"
+        Output:
+            ["Jones B (2019) Other. Journal of Things (8:1):5-9"]
+    """
+    patterns = _VOLUME_ISSUE_PATTERNS.get(volume_issue_format)
+    if patterns is None:
+        return []
+
+    expected_pattern, wrong_pattern = patterns
+    violations = []
+    for ref in raw_reference_list:
+        post_year = get_reference_post_year(ref)
+        # Flag only when the wrong format is present and the expected one is
+        # not, so an entry already in the right format is never flagged even
+        # if some incidental text coincidentally resembles the other form.
+        if wrong_pattern.search(post_year) and not expected_pattern.search(post_year):
+            violations.append(ref)
+
+    return violations

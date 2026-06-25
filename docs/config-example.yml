@@ -1,0 +1,24 @@
+# Configuration for check_refs.py (the APA citation checker).
+#
+# Edit the values below to match the citation style your manuscript uses.
+# All keys are optional; any key you remove falls back to the default shown.
+
+# In-text citation comma style:
+#   true  -> comma style:    (Smith, 2026)
+#   false -> no-comma style: (Smith 2026)
+uses_comma_intext: false
+
+# Author separator before the final author in an IN-TEXT citation:
+#   "and" -> (Smith and Jones 2026)
+#   "&"   -> (Smith & Jones 2026)
+intext_author_separator: "and"
+
+# Author separator before the final author in a REFERENCE-LIST entry:
+#   "and" -> Smith A and Jones B (2026) ...
+#   "&"   -> Smith A & Jones B (2026) ...
+reflist_author_separator: "&"
+
+# Journal volume/issue format in REFERENCE-LIST entries:
+#   "comma"         -> Journal of Things, 16(2)   (volume, then issue in parens)
+#   "parenthetical" -> Journal of Things (16:2)   (volume:issue together in parens)
+reflist_volume_issue_format: "comma"
