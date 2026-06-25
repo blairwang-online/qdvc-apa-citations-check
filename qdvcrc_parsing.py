@@ -25,6 +25,14 @@ REFERENCE_YEAR_PATTERN = re.compile(r'\(((?:16|17|18|19|20)\d{2})(?:,?\s*[^)]*)?
 # Matches a 4-digit year (optionally suffixed, e.g. "2023a") anywhere in text
 YEAR_PATTERN = re.compile(r'\b(16\d{2}|17\d{2}|18\d{2}|19\d{2}|20\d{2})[a-z]?\b')
 
+# Matches an author surname: an uppercase initial letter (ASCII or accented,
+# e.g. the "Ä" in "Mähring") followed by one or more further letters, with
+# optional hyphenated parts (e.g. "Pries-Heje"). Requiring 2+ letters keeps
+# single-letter initials (the "M" in "Mähring M") from being read as surnames.
+AUTHOR_NAME_PATTERN = re.compile(
+    r'\b[A-ZÀ-ÖØ-Þ][^\W\d_\s\-]+(?:-[^\W\d_\s]+)*'
+)
+
 
 def extract_apa_keys_from_inline(cite_text):
     """
@@ -46,7 +54,7 @@ def extract_apa_keys_from_inline(cite_text):
 
     # Extract all individual capitalized words (last names), excluding
     # common conjunctions and 'et al'
-    authors = re.findall(r'\b[A-Z][a-zA-Z\-]+\b', name_part)
+    authors = AUTHOR_NAME_PATTERN.findall(name_part)
     authors = [a for a in authors if a.lower() not in ['and', 'et', 'al']]
 
     return [(author, year) for author in authors]
@@ -68,7 +76,7 @@ def extract_reference_keys(line):
 
     ref_year = ref_year_match.group(1)
     prefix = line.split(ref_year_match.group(0))[0]
-    ref_authors = re.findall(r'\b[A-Z][a-zA-Z\-]+\b', prefix)
+    ref_authors = AUTHOR_NAME_PATTERN.findall(prefix)
 
     prepared_return = []
     for author in ref_authors:
@@ -119,7 +127,8 @@ def parse_document(lines, whitelist):
     """
     Walks the document, tracking which section (text/references/appendix)
     each line belongs to, and builds the core data structures used for
-    analysis:
+    analysis. Body-text and appendix lines are both scanned for inline
+    citations; only reference-list lines populate the reference data:
       - raw_reference_list: every reference-list line, in order
       - references_by_key: {(author, year): [reference lines]}
       - raw_inline_citations: {raw inline citation text: [(author, year), ...]}
@@ -164,7 +173,9 @@ def parse_document(lines, whitelist):
             raw_reference_list.append(stripped_line)
             for key in extract_reference_keys(stripped_line):
                 references_by_key.setdefault(key, []).append(stripped_line)
-        else:
+        elif current_section in ("text", "appendix"):
+            # Body text and appendix material are both scanned for inline
+            # citations and matched against the reference list the same way.
             for clean_cite in extract_inline_citations(stripped_line, whitelist):
                 keys = extract_apa_keys_from_inline(clean_cite)
                 for key in keys:
