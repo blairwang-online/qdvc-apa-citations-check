@@ -18,6 +18,7 @@ What is checked:
 - Reference list entries have matching in-line APA citations
 - In-line citations in appendix material (after the reference list) are checked too
 - Both parenthetical `(Smith 2020)` and narrative `Smith (2020)` in-line citations are recognised
+- Consistent author separators (`and` vs `&`), configurable separately for in-text citations and the reference list
 
 What is not checked:
 

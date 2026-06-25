@@ -255,3 +255,79 @@ README.md isn't impacted. Both edited files end with a blank line, and no markdo
 
 One design choice worth flagging: this folds accents away so the checker treats `Ö` like `O` and `å` like `a`. That matches how most English-language APA reference lists are alphabetized. It deliberately does **not** implement locale-specific collation — for instance, Swedish and Norwegian conventions sort `å`, `ä`, `ö` (or `æ`, `ø`, `å`) *after* `z`, not as variants of `a`/`o`. If your manuscript follows a Nordic-language alphabetization convention, this folding would flag those orderings as violations. If that's a case you need, let me know and I can make the collation locale-aware, though it'd be a meaningfully larger change.
 
+## 15. User request
+
+Alongside USES_COMMA_INTEXT in check_refs.py, add two more configuration constants:
+
+1. Text for separating authors in-text for example Smith and Jones ("and") vs Smith & Jones ("&")
+2. Same thing but for the reference list
+
+## 16. LLM response
+
+Before adding config constants, let me understand how author separators currently flow through parsing and whether anything actually checks them — so I build a feature that connects to real logic rather than dead constants.Now I need to clarify scope. There's an important question here: do you want these constants to be **purely declarative** (just defined, available for future use, like documenting your house style), or should they actually **drive a new check** — i.e., flag in-text citations that use the wrong separator, and flag reference entries that use the wrong separator?
+
+The existing `USES_COMMA_INTEXT` constant *does* drive a check (the style-violations section), so the natural expectation is that these two new constants would too. But adding live checks is a much larger change (new analysis functions, a new report section, parser awareness of separators) than just defining constants. Let me check how the current separator handling works, since the parser already normalizes `&`/`and` away when extracting keys.I now understand the full picture. The parser treats `&` and `and` interchangeably — both are stripped/ignored during key extraction — so separators currently have zero effect on matching. That's why the request to add separator config makes sense as a new dimension the tool doesn't yet track.
+
+The request as written says specifically "add two more configuration constants," paralleling `USES_COMMA_INTEXT`. Given that the existing comma constant drives a real check, but you've only asked to *add the constants*, I want to confirm the intended scope rather than assume — because the difference (declare-only vs. full new check with report section) is substantial.
+
+## 17. User request
+
+Q: You're adding constants for the in-text separator ('and' vs '&') and the reference-list separator. Should they also drive a new check that flags citations/entries using the wrong separator, or just be defined for now?
+A: Also flag wrong separators in the report
+
+## 18. LLM response
+
+Adding the two constants plus a new check that flags wrong separators in both the in-text citations and the reference list, with new report sections. Let me design this carefully.
+
+The plan: two constants in `check_refs.py` (`INTEXT_AUTHOR_SEPARATOR`, `REFLIST_AUTHOR_SEPARATOR`, each `"and"` or `"&"`); two analysis functions to detect violations; report sections for each; and wiring through `check_citations`. I need the parser to preserve enough raw text to detect the separator actually used — let me first check what data is available, since the current structures normalize separators away.
+
+The in-text side: `raw_inline_citations` keys are the raw cite strings (e.g. `"Smith & Jones 2026"`), so the separator is recoverable there. The reference side: `raw_reference_list` holds full raw lines, so recoverable too. Good — no parser changes needed. Let me confirm by inspecting what a multi-author citation/reference looks like in those structures.Both raw structures preserve the actual separator (`&`, `and`, or comma-only). So detection is feasible without touching the parser.
+
+Now the detection logic needs care about what counts as a "wrong separator." Key design decisions:
+
+1. **Only multi-author citations are relevant.** A single-author cite like `Smith 2020` has no separator, so it's never a violation.
+
+2. **What's the violation condition?** If the configured separator is `"and"`, then a citation containing `&` between authors is a violation, and vice versa. But reference lists and in-text APA often legitimately use commas between the first authors and the separator only before the *last* author (e.g. `Brown, Lee, & Smith`). The check should look for the presence of the *wrong* connector word/symbol, not require the right one between every pair.
+
+3. **Comma-only entries** (like `Brown C, Lee D (2019)`) — APA reference lists separate authors with commas and use `&`/`and` only before the final author. A two-author entry `Brown C, Lee D` has no `&`/`and` at all. Should that be flagged as missing the separator? That's a judgment call. The safest, most useful behavior: flag a citation only when it contains the *opposite* separator token, not when it merely lacks the configured one (to avoid noise from comma-separated multi-author entries and abbreviated forms).
+
+Let me verify how to robustly detect `&` vs the word `and` (as a whole word, not inside another word like "Anderson" or "Brand").Detection is clean: `&` and the whole-word `and` are correctly identified, and `and` inside "Anderson"/"Brand" doesn't false-match. The comma-only and single-author cases have neither token, so they won't be flagged — which is the safe behavior I described.
+
+Now I'll implement. First, the detection helper and two check functions in `qdvcrc_analysis.py`. Let me view the end of that file to place them well.Now I'll add the separator-detection regexes near the top and the check functions at the end. First the regexes and a shared helper:I need to import `re` in the analysis module — let me check whether it's already imported.`re` isn't imported. Let me add it.Now add the two check functions at the end of the analysis module.There's a subtlety on the reference side: `find_reference_separator_violations` searches the whole reference line for the wrong token. But a reference's *title* could legitimately contain "&" or "and" — e.g. `Smith A (2020) Crime and punishment in society. Pub, City` would falsely match "and" in the title. I need to restrict the search to the author portion (before the year). Let me check and fix this.Confirmed — a title like "Crime and punishment" gets falsely flagged because the search scans the whole line. I must restrict the reference-side search to the author portion, which precedes the year. The codebase already uses the year-in-parens as the author/title boundary (`REFERENCE_YEAR_PATTERN`). Let me use that to isolate the prefix, mirroring how `extract_reference_keys` works.The pattern: `prefix = line.split(year_match)[0]` gives the author portion. I'll add a small helper in parsing that returns the author prefix, then use it in the reference separator check. This keeps the boundary logic in one place. Let me add the helper and export `REFERENCE_YEAR_PATTERN` usage. Actually, simplest is to expose a helper `get_reference_author_prefix` in parsing and import it. Let me add it.Now update the analysis import and the reference separator check to use the prefix.The in-text side has the same title-risk in principle, but inline citations don't contain titles — they're just `Author(s) Year` — so no prefix restriction is needed there. However, narrative citations synthesized as `"Adams and Clark 2021"` use whatever separator was in the prose, which is correct to check. Let me now verify the title false-positive is fixed and detection still works.All correct. The title-only "and" in the single-author Smith entry is no longer flagged (the prefix `Smith A ` has no separator). The `Jones D & Patel R (2021) Another & thing` line is flagged for `&` in the author prefix when `and` is configured — and the title's `&` is correctly ignored. Single-author in-text citations are never flagged.
+
+Now wire the constants into `check_refs.py` and add report sections. First the constants:Now update the imports and orchestration in `check_refs.py`.Now update the module docstring in `check_refs.py` to reflect the new checks, then update `print_report`.Now update `print_report` to accept and print the two new sections. Let me view it.Now a full end-to-end test with mixed separators matching the configured constants (`INTEXT="and"`, `REFLIST="&"`).Working exactly as designed:
+
+- **Section 5** (in-text wants "and"): flags `(Brown & Lee 2019)` for using `&`, while `Smith and Jones` and the narrative `Adams and Clark` correctly pass.
+- **Section 6** (reflist wants "&"): flags `Smith A and Jones B (2020)` for using "and", while the two `&` entries pass. Critically, `Adams E & Clark F (2021) Work three about peace and war` is **not** flagged despite "and" in its title, because the check only inspects the author prefix.
+
+Now let me verify the title-edge case in section 6 explicitly, run a backward-compat check on `print_report` (old positional call still works via defaults), and confirm trailing newlines.Backward compatibility holds (the old 5-argument `print_report` call still works, with the new sections defaulting to "None"), and all four code files end with a blank line.
+
+Let me run one more regression to confirm the earlier features (narrative, accents, ordering, missing/unused) all still work end to end alongside the new checks, then move to docs.Graceful degradation confirmed — an unrecognized separator value just produces no violations rather than crashing.
+
+Now the docs. I need to update `docs/technical-info-from-claude.md`: the intro check list (now 6), the config-constants list, the `check_citations`/`print_report` references, new rows for the parsing helper and the two analysis functions, and a maintenance note. Let me view the relevant sections.Now add the new parsing helper row, the two analysis function rows, and update the `print_report` row. Let me find the parsing table's `read_document` / `parse_document` area and the report table.Line 19 says "three-section" — that's stale (it became four earlier). I'll update it to six. Let me update line 19, add the parsing helper row after `extract_reference_keys` (line 34), add the two analysis rows after `find_reference_order_violations` (line 52), and update `print_report` (line 60).Now add a maintenance note about the separator checks, then update the README config-related content if any. Let me add the note after the narrative-citation note.Now the README. Let me check whether it documents the checks/scope in a way that should mention separator checking.Now final verification: full run, trailing newlines on all five files, and a syntax/import sanity check across modules.All modules import cleanly (the only output is the expected "file not found" since no document is present), and all six files end with a blank line.
+
+Let me do one final comprehensive end-to-end run that exercises every feature together to confirm nothing regressed.Everything works together correctly:
+
+- **Section 2** correctly flags the Bjørnsson/Öqvist reference as uncited (it's not cited in the body) — and notably it's *not* flagged in section 4 for ordering, because the accent-folding correctly sorts it first (`bjornsson` < `brown`).
+- **Section 5** flags `(Brown & Lee 2019)` for using `&` when in-text wants "and"; the narrative `Liesenfeld and Dingemanse` and `(Smith and Jones 2020)` pass.
+- **Section 6** flags `Bjørnsson K and Öqvist L (2022)` for using "and" when reflist wants `&`. Critically, its title "On ordering and sorting things" contains "and" too, but only the author "and" triggered the flag (prefix-restricted). The `&` references all pass, and Mähring's comma-separated entry isn't flagged.
+
+The cause/design summary: the request was for two config constants for author separators, and you opted to have them drive real checks. The parser already preserved the raw separator text in both `raw_inline_citations` and `raw_reference_list`, so no parser changes were needed for detection — only a small helper to isolate the reference author prefix (so titles don't cause false matches). The checks are presence-based: a citation is flagged only when it contains the *disallowed* token, leaving single-author and comma-only entries alone.
+
+**Files changed:**
+- `check_refs.py` — two new constants, imports, orchestration, updated module docstring.
+- `qdvcrc_analysis.py` — `re` import, separator patterns, `find_intext_separator_violations`, `find_reference_separator_violations`.
+- `qdvcrc_parsing.py` — new `get_reference_author_prefix` helper.
+- `qdvcrc_report.py` — two new report sections (5 and 6), backward-compatible signature.
+- `docs/technical-info-from-claude.md` — intro list, config constants, three new function rows, updated `print_report` and `check_citations` rows, maintenance note.
+- `README.md` — scope bullet.
+
+All files end with a blank line; no markdown was reflowed.All six updated files are attached above.
+
+The constants are set to `INTEXT_AUTHOR_SEPARATOR = "and"` and `REFLIST_AUTHOR_SEPARATOR = "&"` — that combination matches the most common APA convention (narrative in-text uses "and", reference list uses "&"), but flip either to suit your house style.
+
+Two design notes worth flagging:
+
+The checks flag only the presence of the *wrong* separator, not the absence of the right one. So a two-author reference written with a comma and nothing else (e.g. `Brown C, Lee D (2019)`) won't be flagged under either setting, since it contains neither "and" nor "&". This is deliberate — it avoids noise from comma-delimited author lists — but it means the checks catch wrong separators rather than enforcing that every multi-author entry uses the configured one. If you'd want the stricter "must use the configured separator" behavior, that's a follow-up.
+
+Also, the in-text "and" detection would flag an unusual phrasing where "and" appears for a non-separator reason inside a citation, but in practice inline citations are just `Author(s) Year`, so that's very unlikely to misfire.

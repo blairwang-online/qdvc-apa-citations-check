@@ -7,9 +7,12 @@ check_refs.py.
 
 
 def print_report(missing_in_references, unused_references, style_violations,
-                  order_violations, uses_comma_intext):
+                 order_violations, uses_comma_intext,
+                 intext_separator_violations=None,
+                 reference_separator_violations=None,
+                 intext_separator="and", reflist_separator="and"):
     """
-    Prints the formatted four-section APA citation audit report to stdout.
+    Prints the formatted six-section APA citation audit report to stdout.
     Returns nothing.
 
     Example:
@@ -19,6 +22,10 @@ def print_report(missing_in_references, unused_references, style_violations,
             style_violations = ["Jones 2024"]
             order_violations = ["Jones, A. (2024). Another study."]
             uses_comma_intext = True
+            intext_separator_violations = ["Smith & Jones 2020"]
+            reference_separator_violations = ["Brown C and Lee D (2019) ..."]
+            intext_separator = "and"
+            reflist_separator = "&"
         Output (printed):
             --- APA CITATION AUDIT REPORT ---
 
@@ -33,7 +40,15 @@ def print_report(missing_in_references, unused_references, style_violations,
 
             4. References not in alphabetical order:
               - Jones, A. (2024). Another study.
+
+            5. Inline citations not using the configured author separator ("and"):
+              - (Smith & Jones 2020)
+
+            6. References not using the configured author separator ("&"):
+              - Brown C and Lee D (2019) ...
     """
+    intext_separator_violations = intext_separator_violations or []
+    reference_separator_violations = reference_separator_violations or []
     style_example = "(Smith, 2026)" if uses_comma_intext else "(Smith 2026)"
 
     print("--- APA CITATION AUDIT REPORT ---")
@@ -65,3 +80,21 @@ def print_report(missing_in_references, unused_references, style_violations,
             print(f"  - {ref}")
     else:
         print("  None! The Reference list is in alphabetical order.")
+
+    print(f"\n5. Inline citations not using the configured author separator "
+          f"(\"{intext_separator}\"):")
+    if intext_separator_violations:
+        for ref in intext_separator_violations:
+            print(f"  - ({ref})")
+    else:
+        print("  None! All inline citations consistently use the configured "
+              "author separator.")
+
+    print(f"\n6. References not using the configured author separator "
+          f"(\"{reflist_separator}\"):")
+    if reference_separator_violations:
+        for ref in reference_separator_violations:
+            print(f"  - {ref}")
+    else:
+        print("  None! All references consistently use the configured "
+              "author separator.")

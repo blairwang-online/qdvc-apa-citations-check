@@ -105,6 +105,23 @@ def extract_reference_keys(line):
     return prepared_return
 
 
+def get_reference_author_prefix(line):
+    """
+    Returns the author portion of a reference-list line: the text before the
+    year parenthesis. Returns an empty string if no year is found. Used to
+    inspect author separators without matching "and"/"&" that appear later in
+    the entry's title or publisher.
+
+    Example:
+        Input:  "Smith A & Jones B (2020) Crime and punishment. Pub, City"
+        Output: "Smith A & Jones B "
+    """
+    ref_year_match = REFERENCE_YEAR_PATTERN.search(line)
+    if not ref_year_match:
+        return ''
+    return line.split(ref_year_match.group(0))[0]
+
+
 def extract_narrative_citations(line):
     """
     Finds narrative (in-prose) citations, where author names appear in the

@@ -5,6 +5,9 @@ Audits a research paper (plain text) for APA citation consistency:
   1. Inline citations with no matching reference-list entry
   2. Reference-list entries with no matching inline citation
   3. Inline citations that don't follow the configured comma style
+  4. Reference-list entries that aren't in alphabetical order
+  5. Inline citations using the wrong author separator ("and" vs "&")
+  6. Reference-list entries using the wrong author separator ("and" vs "&")
 
 Parsing, analysis, and reporting logic live in the qdvcrc_* modules
 alongside this file (qdvcrc_parsing.py, qdvcrc_analysis.py, qdvcrc_report.py).
@@ -16,6 +19,8 @@ from qdvcrc_analysis import (
     find_unused_references,
     find_style_violations,
     find_reference_order_violations,
+    find_intext_separator_violations,
+    find_reference_separator_violations,
 )
 from qdvcrc_report import print_report
 
@@ -25,6 +30,17 @@ from qdvcrc_report import print_report
 #   True  -> comma style:    (Smith, 2026)
 #   False -> no-comma style: (Smith 2026)
 USES_COMMA_INTEXT = False
+
+# Controls the expected author separator before the final author in an
+# in-text citation:
+#   "and" -> word style: (Smith and Jones 2026)
+#   "&"   -> ampersand:  (Smith & Jones 2026)
+INTEXT_AUTHOR_SEPARATOR = "and"
+
+# Same, but for entries in the reference list:
+#   "and" -> word style: Smith A and Jones B (2026) ...
+#   "&"   -> ampersand:  Smith A & Jones B (2026) ...
+REFLIST_AUTHOR_SEPARATOR = "&"
 
 # Raw inline citation strings in this set are ignored entirely
 # (e.g. for non-citation bracketed content you don't want flagged).
@@ -63,6 +79,12 @@ def check_citations(file_path):
         raw_inline_citations, USES_COMMA_INTEXT, narrative_citations
     )
     order_violations = find_reference_order_violations(raw_reference_list)
+    intext_separator_violations = find_intext_separator_violations(
+        raw_inline_citations, INTEXT_AUTHOR_SEPARATOR
+    )
+    reference_separator_violations = find_reference_separator_violations(
+        raw_reference_list, REFLIST_AUTHOR_SEPARATOR
+    )
 
     print_report(
         missing_in_references,
@@ -70,6 +92,10 @@ def check_citations(file_path):
         style_violations,
         order_violations,
         USES_COMMA_INTEXT,
+        intext_separator_violations,
+        reference_separator_violations,
+        INTEXT_AUTHOR_SEPARATOR,
+        REFLIST_AUTHOR_SEPARATOR,
     )
 
 

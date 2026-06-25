@@ -6,9 +6,25 @@ inline citations against the reference list, finding unused references, and
 checking in-text style consistency. Imported by check_refs.py.
 """
 
+import re
 import unicodedata
 
-from qdvcrc_parsing import YEAR_PATTERN
+from qdvcrc_parsing import YEAR_PATTERN, get_reference_author_prefix
+
+# Detects the two author-separator forms used between names in a citation or
+# reference entry. The word "and" is matched only as a whole word, so it does
+# not fire inside surnames like "Anderson" or "Brand".
+AND_SEPARATOR_PATTERN = re.compile(r'(?<![\w&])and(?![\w])', re.IGNORECASE)
+AMPERSAND_SEPARATOR_PATTERN = re.compile(r'&')
+
+# Maps a configured separator value to the pattern that detects the *other*
+# (disallowed) separator, so a violation is flagged only when the wrong token
+# is actually present (comma-separated or single-author entries are left
+# alone).
+_WRONG_SEPARATOR_PATTERN = {
+    'and': AMPERSAND_SEPARATOR_PATTERN,
+    '&': AND_SEPARATOR_PATTERN,
+}
 
 # Latin letters that have no canonical Unicode decomposition into a base
 # letter plus a combining mark, so NFKD normalization alone can't reduce them
@@ -193,3 +209,58 @@ def find_reference_order_violations(raw_reference_list):
             violations.append(raw_reference_list[i])
 
     return violations
+
+
+def find_intext_separator_violations(raw_inline_citations, intext_separator):
+    """
+    Returns a sorted list of inline citations that join authors with the
+    wrong separator, given the configured in-text separator ("and" or "&").
+    A citation is flagged only when it actually contains the disallowed
+    token; single-author and comma-only citations (which contain neither
+    "and" nor "&") are never flagged.
+
+    Example:
+        Input:
+            raw_inline_citations = {
+                "Smith & Jones 2020": [("Smith","2020"), ("Jones","2020")],
+                "Brown and Lee 2019": [("Brown","2019"), ("Lee","2019")],
+            }, "and"
+        Output:
+            ["Smith & Jones 2020"]
+    """
+    wrong_pattern = _WRONG_SEPARATOR_PATTERN.get(intext_separator)
+    if wrong_pattern is None:
+        return []
+
+    violations = [
+        raw_cite
+        for raw_cite, keys in raw_inline_citations.items()
+        if keys and wrong_pattern.search(raw_cite)
+    ]
+    return sorted(violations)
+
+
+def find_reference_separator_violations(raw_reference_list, reflist_separator):
+    """
+    Returns the reference-list lines that join authors with the wrong
+    separator, given the configured reference-list separator ("and" or "&").
+    A line is flagged only when it actually contains the disallowed token;
+    single-author and comma-only entries are never flagged.
+
+    Example:
+        Input:
+            raw_reference_list = [
+                "Smith A & Jones B (2020) Work one. Pub, City",
+                "Brown C and Lee D (2019) Work two. Pub, City",
+            ], "&"
+        Output:
+            ["Brown C and Lee D (2019) Work two. Pub, City"]
+    """
+    wrong_pattern = _WRONG_SEPARATOR_PATTERN.get(reflist_separator)
+    if wrong_pattern is None:
+        return []
+
+    return [
+        ref for ref in raw_reference_list
+        if wrong_pattern.search(get_reference_author_prefix(ref))
+    ]
