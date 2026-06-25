@@ -6,7 +6,42 @@ inline citations against the reference list, finding unused references, and
 checking in-text style consistency. Imported by check_refs.py.
 """
 
+import unicodedata
+
 from qdvcrc_parsing import YEAR_PATTERN
+
+# Latin letters that have no canonical Unicode decomposition into a base
+# letter plus a combining mark, so NFKD normalization alone can't reduce them
+# to ASCII. They are mapped to their conventional base form(s) explicitly so
+# that alphabetical-order checking treats e.g. "ø" like "o" and "ß" like "ss".
+_FOLD_SPECIAL_CHARS = str.maketrans({
+    'ø': 'o', 'Ø': 'o',
+    'ł': 'l', 'Ł': 'l',
+    'ð': 'd', 'Ð': 'd', 'đ': 'd', 'Đ': 'd',
+    'ß': 'ss',
+    'þ': 'th', 'Þ': 'th',
+    'æ': 'ae', 'Æ': 'ae',
+    'œ': 'oe', 'Œ': 'oe',
+    'ı': 'i',
+    'ħ': 'h', 'Ħ': 'h',
+})
+
+
+def fold_to_ascii(text):
+    """
+    Reduces a string to a lowercase ASCII form for alphabetical comparison,
+    folding accented and other non-ASCII Latin letters to their base letters
+    (e.g. "Öqvist" -> "oqvist", "Bjørnsson" -> "bjornsson"). Characters with
+    no ASCII equivalent are dropped.
+
+    Example:
+        Input:  "Öqvist"
+        Output: "oqvist"
+    """
+    text = text.translate(_FOLD_SPECIAL_CHARS)
+    decomposed = unicodedata.normalize('NFKD', text)
+    ascii_text = decomposed.encode('ascii', 'ignore').decode('ascii')
+    return ascii_text.lower()
 
 
 def matches_intext_style(cite_text, uses_comma_intext):
@@ -121,16 +156,18 @@ def find_style_violations(raw_inline_citations, uses_comma_intext,
 
 def get_reference_sort_key(line):
     """
-    Returns the lowercased author-name portion of a reference-list line,
-    used to check alphabetical ordering. APA reference entries start with
-    the first author's surname before the first comma.
+    Returns the ASCII-folded, lowercased author-name portion of a
+    reference-list line, used to check alphabetical ordering. APA reference
+    entries start with the first author's surname before the first comma.
+    Accented and other non-ASCII Latin letters are folded to their base
+    letters (e.g. "Öqvist" -> "oqvist") so they sort as expected.
 
     Example:
         Input:  "Smith, J. (2026). A study of things."
         Output: "smith"
     """
     author_part = line.split(',')[0].strip()
-    return author_part.lower()
+    return fold_to_ascii(author_part)
 
 
 def find_reference_order_violations(raw_reference_list):
