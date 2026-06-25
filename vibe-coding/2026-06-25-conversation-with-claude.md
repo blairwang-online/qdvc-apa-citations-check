@@ -105,3 +105,39 @@ All three files end with a blank line, and no markdown was reflowed — only the
 
 One thing worth flagging since you chose the "explicit, same checks" option: because the appendix is scanned identically to body text, a citation that appears *only* in the appendix (and nowhere in the body) will still count as "used" and won't be flagged as an unused reference. That's the correct behavior for your stated goal, but if you ever want to distinguish body-only from appendix-only citations in the report, that's the "flag appendix-only citations separately" option from earlier and would be a straightforward follow-up.
 
+## 7. User request
+
+The following was marked as "references in list with no corresponding inline citation" (false positive):
+
+In-line text: "Some claim was made (Mähring et al. 2008)"
+
+References list entry: Mähring M, Keil M, Mathiassen L, Pries-Heje J (2008) Making IT Project De-Escalation Happen: An Exploration into Key Roles. Journal of the Association for Information Systems 9 (8):462-496. doi:10.17705/1jais.00165
+
+## 8. LLM response
+
+Let me reproduce this to find the exact cause.Found it — two separate bugs, both caused by the `Ä`/`ä` in "Mähring".
+
+The inline citation extracts **no keys at all** (`[]`), and the reference extracts keys for `Keil`, `Mathiassen`, `Pries-Heje` but **not** `Mähring`. The shared author "Mähring" is dropped on both sides, so they can never match.
+
+The cause is the author-matching regex `\b[A-Z][a-zA-Z\-]+\b`, which only recognizes ASCII letters. "Mähring" contains `ä`, so the regex breaks: on the reference side the `\b` boundary logic skips it, and on the inline side it fails to find any author before the year.The fix is to make the author-name regex Unicode-aware so it accepts accented capital letters and accented letters within names. The pattern `\b[A-Z][a-zA-Z\-]+\b` appears in three places: `extract_apa_keys_from_inline`, `extract_reference_keys`, and (a slightly different one) inside name extraction. Let me find all occurrences.Two occurrences, both in `qdvcrc_parsing.py`. I need a pattern that matches a capitalized first letter (including accented capitals) followed by letters/hyphens (including accented). The cleanest robust approach is a Unicode-aware pattern: an uppercase letter followed by word characters and hyphens. Let me design and test it carefully against the failing case plus existing cases, including the conjunction/`et al` filtering that follows.The hyphen handling for `Pries-Heje` works, and accented names work. The `À-ÖØ-Þ` range covers the common Latin-1 accented capitals (including `Ä`) while excluding the `×` multiplication sign at `\u00D7`. The apostrophe case (`O'Brien` → `O`, `Brien`) was already broken in the original ASCII regex too, so this isn't a regression — I'll keep the change focused on the reported bug rather than expanding scope.
+
+Let me simplify the pattern slightly and verify it preserves all original behavior, then apply it. The original was `\b[A-Z][a-zA-Z\-]+\b` — note it required at least 2 chars (`+`), so a lone initial like "M" was matched by it too (`[A-Z]` then `[a-zA-Z\-]+`)... actually no, `+` requires one or more *after* the first, so single letters weren't matched. Let me confirm the original behavior on initials to match it exactly.Important: the original regex requires **2+ characters** (`+` after the first class), so single-letter initials like "M" are excluded — that's why surnames are captured but initials aren't. My replacement must preserve that, otherwise initials would be wrongly treated as authors. Let me adjust to require at least one trailing character and re-test the full reference and inline cases end to end.That's exactly right: all four surnames captured (including `Mähring` and hyphenated `Pries-Heje`), single-letter initials excluded. Now let me apply the fix to both lines. I'll define the pattern once as a module constant to keep the two call sites in sync, which is cleaner than duplicating the literal.Now update the two call sites to use the constant. Let me re-view current line numbers since the file shifted.Now verify the fix end to end, including the `et al` / conjunction filtering that runs after extraction in `extract_apa_keys_from_inline`.The match now succeeds. `('Mähring', '2008')` appears on both sides. Now let me run the full report on a realistic document and a regression check on the earlier ASCII cases to ensure nothing broke.The false positive is gone — the Mähring reference is now correctly recognized as cited. Let me run one more regression on the multi-author and conjunction cases from the docstrings to confirm exact backward compatibility, then verify the trailing newline.All backward-compatibility cases pass and the file ends with a blank line.
+
+One thing to note about the conjunction filtering: in `extract_apa_keys_from_inline`, the code filters out authors whose lowercase form is `'and'`, `'et'`, or `'al'`. That filter still works because those are ASCII words, and it's applied after extraction. The accented-name fix doesn't disturb it.
+
+Now the docs. Let me update `docs/technical-info-from-claude.md` with a maintenance note about Unicode author names, since this is a behavior a maintainer should know about.The README scope/limitations don't mention author-name character sets, so no README change is warranted here. Let me confirm the doc file ends with a blank line.The cause was that author-name extraction used an ASCII-only regex (`[A-Z][a-zA-Z\-]+`), so any surname with an accented letter was dropped. For "Mähring" this dropped the shared author on **both** sides — the inline citation extracted no author at all, and the reference extracted only its non-accented co-authors — so they could never match, producing the false "unused reference."
+
+I replaced the inline literal with a shared `AUTHOR_NAME_PATTERN` constant that is Unicode-aware: it accepts an uppercase initial (ASCII or Latin-1 accented), requires at least two letters so single initials like "M" still aren't mistaken for surnames, and handles hyphenated names like "Pries-Heje." Both extraction functions now use it, keeping them in sync.
+
+**Files changed:**
+- `qdvcrc_parsing.py` — added `AUTHOR_NAME_PATTERN`, used it in `extract_apa_keys_from_inline` and `extract_reference_keys`.
+- `docs/technical-info-from-claude.md` — maintenance note on accented author names.
+
+README.md isn't impacted. All edited files end with a blank line, and no markdown was reflowed.Both updated files are attached above.
+
+A couple of things worth flagging while we're here, in case they show up in your paper:
+
+The accented-letter range I used (`À-ÖØ-Þ`) covers Western European names (ä, ö, ü, é, ñ, ø, etc.). It does **not** cover names in, say, Polish (ł, ś), Czech (č, ř), or Turkish (ğ, ş), nor non-Latin scripts. If your reference list has any of those, let me know and I'll widen it — the change would be a one-line edit to that character class.
+
+Also, the existing apostrophe case (e.g. "O'Brien") splits into two tokens; that was already true before this change, so it's not a regression, but it's a related gap if you have any such names.
+
