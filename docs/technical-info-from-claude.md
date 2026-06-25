@@ -1,61 +1,174 @@
-# Technical info provided by Claude
+"""
+qdvcrc_parsing.py
 
-**check_refs — APA Citation Checker** 
+Low-level helpers for reading a document and extracting citation and
+reference data from it. Imported by check_refs.py.
+"""
 
-Audits a research paper (plain text) for APA citation consistency:
-1. Inline citations with no matching reference-list entry
-2. Reference-list entries with no matching inline citation
-3. Inline citations that don't follow the configured comma style
-4. Reference-list entries that aren't in alphabetical order
+import re
 
-## File Overview
+# Section header detection (compiled once, reused on every parse)
+REFERENCE_START_PATTERN = re.compile(
+    r'^#*\s*(?:\d+(?:\.\d+)*\s*\.?\s*)?references', re.IGNORECASE
+)
+APPENDIX_START_PATTERN = re.compile(
+    r'^#*\s*(?:\d+(?:\.\d+)*\s*\.?\s*)?appendix', re.IGNORECASE
+)
 
-### `check_refs.py` (main file)
+# Pulls everything inside [] or () from a line of body text
+INLINE_BRACKET_PATTERN = r'\[(.*?)\]|\((.*?)\)'
 
-| Function | Description | Example Input | Example Output |
-|---|---|---|---|
-| `check_citations(file_path)` | Runs the full APA citation audit on the given file and prints a report. | `"paper.txt"` (a file containing body text with (Author, Year) citations and a References section) | *(printed)* the three-section APA CITATION AUDIT REPORT |
+# Matches a reference-list entry's year, allowing trailing month/day info,
+# e.g. "(2023, 23 May)" or "(2023)" -> captures "2023"
+REFERENCE_YEAR_PATTERN = re.compile(r'\(((?:16|17|18|19|20)\d{2})(?:,?\s*[^)]*)?\)')
 
-Also defines the configuration constants:
-- `USES_COMMA_INTEXT` — controls the expected in-text citation style: `True` for comma style `(Smith, 2026)`, `False` for no-comma style `(Smith 2026)`.
-- `whitelist` — raw inline citation strings in this set are ignored entirely (e.g. for non-citation bracketed content you don't want flagged).
+# Matches a 4-digit year (optionally suffixed, e.g. "2023a") anywhere in text
+YEAR_PATTERN = re.compile(r'\b(16\d{2}|17\d{2}|18\d{2}|19\d{2}|20\d{2})[a-z]?\b')
 
-### `qdvcrc_parsing.py`
 
-Low-level helpers for reading a document and extracting citation and reference data from it.
+def extract_apa_keys_from_inline(cite_text):
+    """
+    Extracts (Author, Year) keys from a raw inline citation string.
+    Handles multiple authors, 'et al.', '&', and 'and'.
 
-| Function | Description | Example Input | Example Output |
-|---|---|---|---|
-| `extract_apa_keys_from_inline(cite_text)` | Extracts (Author, Year) keys from a raw inline citation string. Handles multiple authors, 'et al.', '&', and 'and'. | `"Smith & Jones, 2026"` | `[("Smith", "2026"), ("Jones", "2026")]` |
-| `extract_reference_keys(line)` | Given a stripped reference-list line, returns the (Author, Year) keys found in it, based on the year in parentheses and the author names preceding it. | `"Smith, J. (2026). A study of things. Journal of Things."` | `[("Smith", "2026")]` |
-| `extract_inline_citations(line, whitelist)` | Given a stripped line of body/appendix text, returns the list of cleaned, individual inline citation strings found inside `[]` or `()`, split on `;` for multi-citation brackets, and filtered by whitelist. | `"This is shown elsewhere (Smith, 2026; Jones 2024)."`, `{}` | `["Smith, 2026", "Jones 2024"]` |
-| `read_document(file_path)` | Reads a file into a list of lines, or returns `None` on failure. | `"paper.txt"` (file contains `"Line one\nLine two\n"`) | `["Line one\n", "Line two\n"]` |
-| `parse_document(lines, whitelist)` | Walks the document, tracking which section (text/references/appendix) each line belongs to, and builds the core data structures used for analysis. | `["Body text (Smith, 2026).\n", "References\n", "Smith, J. (2026). A study of things.\n"]`, `{}` | `(["Smith, J. (2026). A study of things."], {("Smith", "2026"): ["Smith, J. (2026). A study of things."]}, {"Smith, 2026": [("Smith", "2026")]}, {("Smith", "2026"): ["Smith, 2026"]})` |
+    Example:
+        Input:  "Smith & Jones, 2026"
+        Output: [("Smith", "2026"), ("Jones", "2026")]
+    """
+    year_match = YEAR_PATTERN.search(cite_text)
+    if not year_match:
+        return []
+    year = year_match.group(1)
 
-### `qdvcrc_analysis.py`
+    # Remove the year, parentheses, commas to isolate author names
+    name_part = YEAR_PATTERN.sub('', cite_text)
+    name_part = re.sub(r'[\(\),]', '', name_part).strip()
 
-Functions that analyze the data parsed by `qdvcrc_parsing.py`: cross-matching inline citations against the reference list, finding unused references, and checking in-text style consistency.
+    # Extract all individual capitalized words (last names), excluding
+    # common conjunctions and 'et al'
+    authors = re.findall(r'\b[A-Z][a-zA-Z\-]+\b', name_part)
+    authors = [a for a in authors if a.lower() not in ['and', 'et', 'al']]
 
-| Function | Description | Example Input | Example Output |
-|---|---|---|---|
-| `matches_intext_style(cite_text, uses_comma_intext)` | Checks whether a cleaned inline citation string follows the given comma style. Citations with no detectable year are treated as not applicable (`True`). | `"Jones 2024"`, `True` | `False` |
-| `find_missing_and_used_references(raw_inline_citations, references_by_key)` | Cross-references inline citations against the reference list. Returns inline citation text with no matching reference-list entry, and reference-list lines matched by at least one inline citation. | `raw_inline_citations = {"Smith, 2026": [("Smith","2026")], "Nguyen, 2025": [("Nguyen","2025")]}`<br>`references_by_key = {("Smith","2026"): ["Smith, J. (2026). A study of things."]}` | `({"Nguyen, 2025"}, {"Smith, J. (2026). A study of things."})` |
-| `find_unused_references(raw_reference_list, used_reference_entries)` | Returns reference-list lines that no inline citation matched. | `raw_reference_list = ["Smith, J. (2026). A study of things.", "Patel, R. (2021). Unused reference."]`<br>`used_reference_entries = {"Smith, J. (2026). A study of things."}` | `["Patel, R. (2021). Unused reference."]` |
-| `find_style_violations(raw_inline_citations, uses_comma_intext)` | Returns a sorted list of inline citations that don't conform to the given comma style. | `raw_inline_citations = {"Smith, 2026": [("Smith","2026")], "Jones 2024": [("Jones","2024")]}`, `True` | `["Jones 2024"]` |
-| `get_reference_sort_key(line)` | Returns the lowercased author-name portion of a reference-list line, used to check alphabetical ordering. APA reference entries start with the first author's surname before the first comma. | `"Smith, J. (2026). A study of things."` | `"smith"` |
-| `find_reference_order_violations(raw_reference_list)` | Returns the reference-list lines that are out of alphabetical order relative to the entry immediately before them, based on each entry's leading author surname (the text before the first comma). | `raw_reference_list = ["Smith, J. (2026). A study of things.", "Jones, A. (2024). Another study."]` | `["Jones, A. (2024). Another study."]` |
+    return [(author, year) for author in authors]
 
-### `qdvcrc_report.py`
 
-Formats and prints the final APA citation audit report.
+def extract_reference_keys(line):
+    """
+    Given a stripped reference-list line, returns the (Author, Year) keys
+    found in it, based on the year in parentheses and the author names
+    preceding it.
 
-| Function | Description | Example Input | Example Output |
-|---|---|---|---|
-| `print_report(missing_in_references, unused_references, style_violations, order_violations, uses_comma_intext)` | Prints the formatted four-section APA citation audit report to stdout. Returns nothing. | `missing_in_references = {"Nguyen, 2025"}`<br>`unused_references = ["Patel, R. (2021). Unused reference."]`<br>`style_violations = ["Jones 2024"]`<br>`order_violations = ["Jones, A. (2024). Another study."]`<br>`uses_comma_intext = True` | *(printed)*<br>`--- APA CITATION AUDIT REPORT ---`<br>`1. ... missing: - (Nguyen, 2025)`<br>`2. ... unused: - Patel, R. (2021). Unused reference.`<br>`3. ... style: - (Jones 2024)`<br>`4. ... order: - Jones, A. (2024). Another study.` |
+    Example:
+        Input:  "Smith, J. (2026). A study of things. Journal of Things."
+        Output: [("Smith", "2026")]
+    """
+    ref_year_match = REFERENCE_YEAR_PATTERN.search(line)
+    if not ref_year_match:
+        return []
 
-## Maintenance Notes
+    ref_year = ref_year_match.group(1)
+    prefix = line.split(ref_year_match.group(0))[0]
+    ref_authors = re.findall(r'\b[A-Z][a-zA-Z\-]+\b', prefix)
 
-- **All four files must stay in the same directory.** `check_refs.py` imports directly from `qdvcrc_parsing`, `qdvcrc_analysis`, and `qdvcrc_report` by module name (no package structure), so they need to be co-located to run.
-- **Configuration lives in `check_refs.py`, not the `qdvcrc_*` modules.** `USES_COMMA_INTEXT` and `whitelist` are defined in the main file and passed into the helper functions as parameters (e.g. `find_style_violations(raw_inline_citations, USES_COMMA_INTEXT)`). This avoids a circular import back into the main file — if you add new configuration, follow the same pattern rather than importing it into a `qdvcrc_*` module.
-- **Citation/reference matching is name+year based, not exact-text based.** Both inline citations and reference entries are reduced to `(Author, Year)` key tuples before comparison, so the checker is tolerant of minor formatting differences but can also produce false matches if two different authors share a surname and publication year.
-- **Alphabetical-order checking compares each entry only to the one immediately before it**, using the surname before the first comma as the sort key. It flags the entry that breaks the sequence, not every entry that's technically misplaced — so a single line moved out of place will produce one violation, but it won't independently verify the full list is sorted from scratch.
+    prepared_return = []
+    for author in ref_authors:
+        prepared_return.append((author, ref_year))
+
+    return prepared_return
+
+
+def extract_inline_citations(line, whitelist):
+    """
+    Given a stripped line of body/appendix text, returns the list of
+    cleaned, individual inline citation strings found inside [] or (),
+    split on ';' for multi-citation brackets, and filtered by whitelist.
+
+    Example:
+        Input:  "This is shown elsewhere (Smith, 2026; Jones 2024).", {}
+        Output: ["Smith, 2026", "Jones 2024"]
+    """
+    cites = []
+    for match in re.findall(INLINE_BRACKET_PATTERN, line):
+        raw_cite = next((m for m in match if m), None)
+        if not raw_cite:
+            continue
+        for cite in raw_cite.split(';'):
+            clean_cite = cite.strip()
+            if clean_cite and clean_cite not in whitelist:
+                cites.append(clean_cite)
+    return cites
+
+
+def read_document(file_path):
+    """
+    Reads a file into a list of lines, or returns None on failure.
+
+    Example:
+        Input:  "paper.txt" (file contains "Line one\\nLine two\\n")
+        Output: ["Line one\\n", "Line two\\n"]
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as file:
+            return file.readlines()
+    except FileNotFoundError:
+        print(f"Error: The file {file_path} was not found.")
+        return None
+
+
+def parse_document(lines, whitelist):
+    """
+    Walks the document, tracking which section (text/references/appendix)
+    each line belongs to, and builds the core data structures used for
+    analysis:
+      - raw_reference_list: every reference-list line, in order
+      - references_by_key: {(author, year): [reference lines]}
+      - raw_inline_citations: {raw inline citation text: [(author, year), ...]}
+      - citations_by_key: {(author, year): [raw inline citation text, ...]}
+
+    Example:
+        Input:
+            [
+                "Body text (Smith, 2026).\\n",
+                "References\\n",
+                "Smith, J. (2026). A study of things.\\n",
+            ], {}
+        Output:
+            (
+                ["Smith, J. (2026). A study of things."],
+                {("Smith", "2026"): ["Smith, J. (2026). A study of things."]},
+                {"Smith, 2026": [("Smith", "2026")]},
+                {("Smith", "2026"): ["Smith, 2026"]},
+            )
+    """
+    raw_reference_list = []
+    references_by_key = {}
+    raw_inline_citations = {}
+    citations_by_key = {}
+
+    current_section = "text"
+
+    for line in lines:
+        stripped_line = line.strip()
+        if not stripped_line:
+            continue
+
+        if REFERENCE_START_PATTERN.match(stripped_line):
+            current_section = "references"
+            continue
+
+        if APPENDIX_START_PATTERN.match(stripped_line):
+            current_section = "appendix"
+            continue
+
+        if current_section == "references":
+            raw_reference_list.append(stripped_line)
+            for key in extract_reference_keys(stripped_line):
+                references_by_key.setdefault(key, []).append(stripped_line)
+        else:
+            for clean_cite in extract_inline_citations(stripped_line, whitelist):
+                keys = extract_apa_keys_from_inline(clean_cite)
+                for key in keys:
+                    citations_by_key.setdefault(key, []).append(clean_cite)
+                raw_inline_citations[clean_cite] = keys
+
+    return raw_reference_list, references_by_key, raw_inline_citations, citations_by_key

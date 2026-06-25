@@ -20,7 +20,7 @@ INLINE_BRACKET_PATTERN = r'\[(.*?)\]|\((.*?)\)'
 
 # Matches a reference-list entry's year, allowing trailing month/day info,
 # e.g. "(2023, 23 May)" or "(2023)" -> captures "2023"
-REFERENCE_YEAR_PATTERN = re.compile(r'\(((?:19|20)\d{2})(?:,?\s*[^)]*)?\)')
+REFERENCE_YEAR_PATTERN = re.compile(r'\(((?:16|17|18|19|20)\d{2})(?:,?\s*[^)]*)?\)')
 
 # Matches a 4-digit year (optionally suffixed, e.g. "2023a") anywhere in text
 YEAR_PATTERN = re.compile(r'\b(16\d{2}|17\d{2}|18\d{2}|19\d{2}|20\d{2})[a-z]?\b')
