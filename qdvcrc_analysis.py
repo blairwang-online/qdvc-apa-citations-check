@@ -38,6 +38,12 @@ _WRONG_SEPARATOR_PATTERN = {
 PARENTHETICAL_VOLUME_ISSUE_PATTERN = re.compile(r'\(\s*\d+\s*:\s*\d+\s*\)')
 COMMA_VOLUME_ISSUE_PATTERN = re.compile(r'\b\d+\s*\(\s*\d+\s*\)')
 
+# Detects a stray comma immediately before a parenthetical volume/issue, e.g.
+# "Journal of Things, (16:2)". In parenthetical format the journal name should
+# be followed directly by the paren with no comma, so this is a violation even
+# though the "(16:2)" part itself is correctly formatted.
+COMMA_BEFORE_PARENTHETICAL_PATTERN = re.compile(r',\s*\(\s*\d+\s*:\s*\d+\s*\)')
+
 # Maps a configured volume/issue format to (pattern_for_this_format,
 # pattern_for_the_other_format). A line is flagged only when it matches the
 # *other* format, so entries with no recognizable volume/issue are left alone.
@@ -291,8 +297,13 @@ def find_volume_issue_violations(raw_reference_list, volume_issue_format):
     Returns the reference-list lines whose journal volume/issue uses the wrong
     format, given the configured format ("comma" for "Journal, 16(2)" or
     "parenthetical" for "Journal (16:2)"). Only the text after the year is
-    inspected, and a line is flagged only when it matches the *other* format;
+    inspected, and a line is flagged when it matches the *other* format;
     entries with no recognizable volume/issue (e.g. books) are never flagged.
+
+    For the "parenthetical" format, a line is also flagged when a stray comma
+    sits immediately before the parenthetical volume/issue (e.g. "Journal of
+    Things, (16:2)"), since the journal name should be followed directly by
+    the paren with no comma.
 
     Example:
         Input:
@@ -311,10 +322,21 @@ def find_volume_issue_violations(raw_reference_list, volume_issue_format):
     violations = []
     for ref in raw_reference_list:
         post_year = get_reference_post_year(ref)
-        # Flag only when the wrong format is present and the expected one is
-        # not, so an entry already in the right format is never flagged even
-        # if some incidental text coincidentally resembles the other form.
-        if wrong_pattern.search(post_year) and not expected_pattern.search(post_year):
+        # Flag when the wrong format is present and the expected one is not, so
+        # an entry already in the right format is never flagged even if some
+        # incidental text coincidentally resembles the other form.
+        is_violation = (
+            wrong_pattern.search(post_year)
+            and not expected_pattern.search(post_year)
+        )
+        # In parenthetical format, also reject a stray comma directly before
+        # the "(volume:issue)" group (e.g. "Journal, (16:2)"), which would
+        # otherwise slip through because the "(16:2)" part is well-formed.
+        if volume_issue_format == 'parenthetical' and \
+                COMMA_BEFORE_PARENTHETICAL_PATTERN.search(post_year):
+            is_violation = True
+
+        if is_violation:
             violations.append(ref)
 
     return violations

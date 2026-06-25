@@ -405,3 +405,44 @@ The `whitelist` stayed in `check_refs.py` as a code-level set rather than moving
 On the volume/issue check: it keys off the colon to tell the two formats apart, so a parenthetical entry must be written as `(16:2)` (colon-joined). If your manuscript ever uses a parenthetical form *without* a colon — e.g. `(16, 2)` or `(16)(2)` — it won't be recognized as either format and won't be flagged. The two canonical forms you specified are both handled correctly.
 
 Also, the script still auto-runs `check_citations('check_refs_document.txt')` at import time (unchanged pre-existing behavior), so importing any function from `check_refs.py` triggers a run. If you'd ever want to make that a proper `if __name__ == "__main__":` guard so the module is importable for testing, I can do that cleanly — but I left it as-is since it wasn't part of this request.
+
+## 23. User request
+
+If citation follows Journal of Things, (16:2), do not allow that to pass. The comma should not be there if reflist_volume_issue_format = parenthetical.
+
+## 24. LLM response
+
+Good catch — that's a real gap. Let me reproduce it first to confirm the current behavior.Confirmed — `Journal of Things, (16:2)` passes when it shouldn't. The reason: the parenthetical check only verifies that `(16:2)` is present; it doesn't care whether a comma precedes it. So a hybrid like `, (16:2)` satisfies the "expected" pattern and is never flagged.
+
+Let me look at the current check logic to design the fix precisely.I understand the issue fully now. The problem is specifically about the parenthetical format: a correct parenthetical entry has the journal name followed by a space and then `(16:2)`, with **no comma**. A comma before the paren (`Journal, (16:2)`) is a hybrid that should fail.
+
+The cleanest fix is to detect a "comma immediately before a parenthetical volume/issue" as its own violation condition when the config is `parenthetical`. I need a pattern for that, then flag it in addition to the existing wrong-format check. Let me design and test the pattern, being careful not to false-match legitimate cases.The pattern works correctly. The one case worth thinking about is the last: `Some, Title (16:2)` — a comma earlier in the title, but with a space-separated word ("Title") between the comma and the paren. That correctly does **not** match, because the pattern requires the comma to be *immediately* before the paren (only whitespace allowed between). So a comma elsewhere in the journal/title text won't false-trigger.
+
+Now let me think about the symmetric concern. The user's report is specifically about the parenthetical config. Should the comma config have an analogous rule? In comma style (`Journal, 16(2)`), the comma before the volume is *expected*, so its presence is correct, not a violation. There's no equivalent "stray comma" problem there. So this fix is specific to the parenthetical format — adding a check that a comma must not immediately precede the parenthetical volume/issue.
+
+Let me add the pattern and wire it into the check. I'll add the comma-before-paren detection as an additional violation trigger only when the format is `parenthetical`.Now update the check function. The logic: a line is a violation if it matches the wrong format (existing logic), OR — when format is parenthetical — if it has a stray comma before the parenthetical volume/issue. Let me view the function and its docstring to update both.Now test the fix thoroughly — the reported case, plus regressions to make sure correct entries still pass and the comma format is unaffected.All cases behave correctly:
+
+**Parenthetical config:**
+- The reported hybrid `Journal of Things, (16:2)` is now flagged ✓
+- Correct `Journal of Things (16:2)` passes ✓
+- Comma format flagged as wrong format ✓
+- No-space `Journal,(16:2)` flagged ✓
+- Comma in the *title* with a correct paren (`Crime, punishment. Journal of Things (16:2)`) correctly passes — the comma isn't adjacent to the paren ✓
+
+**Comma config (unaffected):** correct comma passes, parenthetical flagged as wrong, and the hybrid is also flagged under comma config (because it contains the parenthetical `(16:2)` form, which is the wrong format here) ✓
+
+Let me run the full end-to-end audit with the parenthetical config to confirm the report shows it, then check the trailing newline.The full report now correctly flags the hybrid `Journal of Things, (16:2)` entry under parenthetical config in section 7, while the correct `Journal of Things (8:1)` entry passes. Config restored to default, and the file ends with a blank line.
+
+Now the docs. The maintenance note for volume/issue should mention this comma rule, and the `find_volume_issue_violations` doc table row's description should reflect it. Let me update both.The README's scope/config descriptions are high-level and don't get into the comma-adjacency detail, so no README change is warranted. Let me verify the doc newline and do a final compile check.Both files compile and end with a blank line.
+
+The gap was that the parenthetical check only confirmed that `(16:2)` was present — it didn't care what came before it. So a hybrid like `Journal of Things, (16:2)` satisfied the "expected" pattern and passed, even though the comma shouldn't be there in parenthetical format.
+
+I added `COMMA_BEFORE_PARENTHETICAL_PATTERN` to detect a comma sitting immediately before the `(volume:issue)` group, and `find_volume_issue_violations` now flags that as a violation when the configured format is `parenthetical`. The pattern requires the comma to be directly adjacent (only whitespace between), so a comma elsewhere in the journal name or title — like `Crime, punishment. Journal of Things (16:2)` — is not affected. The comma format is unchanged, since a comma before the volume is expected there.
+
+**Files changed:**
+- `qdvcrc_analysis.py` — new pattern and the added violation condition.
+- `docs/technical-info-from-claude.md` — updated the function row and maintenance note.
+
+Both end with a blank line; no markdown was reflowed.Both updated files are attached above.
+
+One symmetry note worth flagging: this fix is specific to the parenthetical format, since that's the case you reported and the one where a comma is genuinely wrong. The comma format has its own looser side — it accepts `Journal, 16(2)`, `Journal 16(2)` (no comma), and `Journal 16 (2)` all as valid, because the distinguishing feature there is just "bare volume followed by issue-in-parens." If you also want the comma format to *require* the comma (i.e. flag `Journal 16(2)` for missing it), that'd be the mirror-image rule and an easy follow-up — just let me know.
