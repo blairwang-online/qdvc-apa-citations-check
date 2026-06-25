@@ -139,6 +139,41 @@ def get_reference_post_year(line):
     return line[ref_year_match.end():]
 
 
+def extract_reference_title(line, start_symbol='', end_symbol=''):
+    """
+    Returns the title portion of a reference-list line: the first segment after
+    the year parenthesis, up to the journal/publisher that follows. Returns an
+    empty string if no year is found.
+
+    The leading separator after the year (an APA-style ". " or just a space) is
+    stripped. If start_symbol and end_symbol are given and the title begins with
+    start_symbol, the title is taken through the matching end_symbol (so a
+    period inside the closing symbol, e.g. "A study." , doesn't truncate it);
+    otherwise the title is taken up to the first period that ends the sentence.
+
+    Example:
+        Input:  'Smith A (2026). "A study of things". Journal of Things', '"', '"'
+        Output: '"A study of things"'
+    """
+    post_year = get_reference_post_year(line)
+    if not post_year:
+        return ''
+
+    title_region = post_year.strip()
+    if title_region.startswith('.'):
+        title_region = title_region[1:].lstrip()
+
+    if start_symbol and end_symbol and title_region.startswith(start_symbol):
+        end_index = title_region.find(end_symbol, len(start_symbol))
+        if end_index != -1:
+            return title_region[:end_index + len(end_symbol)]
+
+    sentence_end = re.search(r'\.(\s|$)', title_region)
+    if sentence_end:
+        return title_region[:sentence_end.start()].strip()
+    return title_region.strip()
+
+
 def extract_narrative_citations(line):
     """
     Finds narrative (in-prose) citations, where author names appear in the

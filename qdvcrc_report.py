@@ -12,9 +12,11 @@ def print_report(missing_in_references, unused_references, style_violations,
                  reference_separator_violations=None,
                  intext_separator="and", reflist_separator="and",
                  volume_issue_violations=None,
-                 volume_issue_format="comma"):
+                 volume_issue_format="comma",
+                 title_symbol_violations=None,
+                 title_start_symbol="", title_end_symbol=""):
     """
-    Prints the formatted seven-section APA citation audit report to stdout.
+    Prints the formatted eight-section APA citation audit report to stdout.
     Returns nothing.
 
     Example:
@@ -30,6 +32,9 @@ def print_report(missing_in_references, unused_references, style_violations,
             reflist_separator = "&"
             volume_issue_violations = ["Jones B (2019) Other. Journal (8:1)"]
             volume_issue_format = "comma"
+            title_symbol_violations = ["Lee C (2022). Unquoted title. Journal"]
+            title_start_symbol = "“"
+            title_end_symbol = "”"
         Output (printed):
             --- APA CITATION AUDIT REPORT ---
 
@@ -53,10 +58,14 @@ def print_report(missing_in_references, unused_references, style_violations,
 
             7. References not using the configured volume/issue format ("comma"):
               - Jones B (2019) Other. Journal (8:1)
+
+            8. References whose title isn't wrapped in the configured symbols (“ ”):
+              - Lee C (2022). Unquoted title. Journal
     """
     intext_separator_violations = intext_separator_violations or []
     reference_separator_violations = reference_separator_violations or []
     volume_issue_violations = volume_issue_violations or []
+    title_symbol_violations = title_symbol_violations or []
     style_example = "(Smith, 2026)" if uses_comma_intext else "(Smith 2026)"
 
     print("--- APA CITATION AUDIT REPORT ---")
@@ -115,3 +124,17 @@ def print_report(missing_in_references, unused_references, style_violations,
     else:
         print("  None! All references consistently use the configured "
               "volume/issue format.")
+
+    if title_start_symbol and title_end_symbol:
+        title_symbols = f"{title_start_symbol} {title_end_symbol}"
+        print(f"\n8. References whose title isn't wrapped in the configured "
+              f"symbols ({title_symbols}):")
+        if title_symbol_violations:
+            for ref in title_symbol_violations:
+                print(f"  - {ref}")
+        else:
+            print("  None! All reference titles use the configured symbols.")
+    else:
+        print("\n8. References whose title isn't wrapped in the configured "
+              "symbols:")
+        print("  Skipped (no title symbols configured).")

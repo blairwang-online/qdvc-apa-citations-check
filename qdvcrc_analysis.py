@@ -13,6 +13,7 @@ from qdvcrc_parsing import (
     YEAR_PATTERN,
     get_reference_author_prefix,
     get_reference_post_year,
+    extract_reference_title,
 )
 
 # Detects the two author-separator forms used between names in a citation or
@@ -337,6 +338,41 @@ def find_volume_issue_violations(raw_reference_list, volume_issue_format):
             is_violation = True
 
         if is_violation:
+            violations.append(ref)
+
+    return violations
+
+
+def find_title_symbol_violations(raw_reference_list, start_symbol, end_symbol):
+    """
+    Returns the reference-list lines whose title is not wrapped in the
+    configured start and end symbols. If either symbol is empty the check is
+    disabled and nothing is flagged (the "no symbols" configuration). Entries
+    with no detectable title (no year, or nothing after it) are skipped.
+
+    Note: this flags any title not wrapped in the symbols, including book
+    titles, which in APA are italicized rather than quoted; plain text can't
+    convey italics, so such entries will be reported when a symbol style is
+    configured.
+
+    Example:
+        Input:
+            raw_reference_list = [
+                'Smith A (2026). “A study of things”. Journal of Things',
+                'Jones B (2025). An unquoted title. Journal of Stuff',
+            ], "“", "”"
+        Output:
+            ['Jones B (2025). An unquoted title. Journal of Stuff']
+    """
+    if not start_symbol or not end_symbol:
+        return []
+
+    violations = []
+    for ref in raw_reference_list:
+        title = extract_reference_title(ref, start_symbol, end_symbol)
+        if not title:
+            continue
+        if not (title.startswith(start_symbol) and title.endswith(end_symbol)):
             violations.append(ref)
 
     return violations

@@ -446,3 +446,94 @@ I added `COMMA_BEFORE_PARENTHETICAL_PATTERN` to detect a comma sitting immediate
 Both end with a blank line; no markdown was reflowed.Both updated files are attached above.
 
 One symmetry note worth flagging: this fix is specific to the parenthetical format, since that's the case you reported and the one where a comma is genuinely wrong. The comma format has its own looser side — it accepts `Journal, 16(2)`, `Journal 16(2)` (no comma), and `Journal 16 (2)` all as valid, because the distinguishing feature there is just "bare volume followed by issue-in-parens." If you also want the comma format to *require* the comma (i.e. flag `Journal 16(2)` for missing it), that'd be the mirror-image rule and an easy follow-up — just let me know.
+
+## 25. User request
+
+Good job. Another thing to configure (config.yml) and check for: whether the title surrounded by specific symbols. Some possible config options:
+
+1. No symbols: Smith (2026). A study of things. Journal of Things
+2. Symmetrical symbols: Smith (2026). "A study of things". Journal of Things
+3. Asymmetrical symbols: Smith (2026). „A study of things“. Journal of Things
+
+In other words, allow the user to specify the start symbol and end symbol for the title. Default to `“` for start symbol and `”` for end symbol.
+
+## 26. LLM response
+
+Let me think through this carefully — it's more nuanced than the previous checks, because I need to reliably locate the title within a reference entry, which the codebase doesn't currently isolate.
+
+First, let me understand the structure. In these examples the title comes right after the year-and-closing-paren and the period, and ends before the next period (the journal name follows). Let me look at how the post-year text is structured and confirm the title boundary.I can see the structure. Two important observations:
+
+1. The post-year text starts with either `. ` (APA-style: `Smith A (2026). Title.`) or just ` ` (the project's other style: `Mähring M (2008) Title.`). So the title begins after the leading period/space, and ends at the first period that terminates it.
+
+2. The title can itself contain periods or internal punctuation in edge cases, but in these formats the title is the text up to the first `. ` that precedes the journal. This is the genuinely hard part — reliably isolating the title.
+
+Let me think about what the check actually needs. The user wants to verify the title is wrapped in configured start/end symbols. The cleanest, most robust approach: extract the title segment (the first "sentence" after the year), then check whether it starts with the start symbol and ends with the end symbol. Let me probe how to extract that title segment reliably across the formats.The extraction works for the simple cases, but I see a real problem with the symmetrical-quote case: `"A study of things"` — the closing quote sits *before* the period, so my `\.(\s|$)` regex finds the period after the closing quote and the title correctly includes the quotes. Good. But there's a subtle issue: when the title has quotes, the period might be *inside* or *outside* the quotes depending on style, and titles can contain abbreviations with periods (e.g. "A study of U.S. policy"). Let me probe these edge cases, because a naive "first period" split will truncate titles with internal periods.These edge cases confirm the difficulty:
+
+1. `A study of U.S. policy` → truncated to `A study of U.S` (internal abbreviation breaks it).
+2. `"A study of things."` with the period *inside* the quote → the title extraction overshoots and grabs the journal too.
+
+This is genuinely ambiguous and there's no perfect heuristic for free-text title boundaries. So I need to decide on the right scope and approach with you, because how I detect the title materially affects correctness and false positives. There are two viable strategies:
+
+**A. Symbol-presence check (robust, narrow):** Don't try to perfectly isolate the title. Instead, check whether the configured start and end symbols appear in the post-year region in the right order, right after the year. This sidesteps title-boundary ambiguity. The trade-off: it's a presence/position check, not a strict "the title and nothing but the title is wrapped" check.
+
+**B. Full title extraction (precise, fragile):** Isolate the exact title and verify it begins and ends with the symbols. More precise when it works, but brittle on internal periods and period-inside-quote cases, risking false positives on legitimate entries.
+
+Given the tool's "quick and dirty, second-opinion" philosophy and the importance of not flagging correct entries, I lean toward A. But let me confirm with you before building, since it changes what "checked" means.
+
+## 27. User request
+
+Q: To check title symbols I need to locate the title in each reference. Titles have no reliable delimiter (internal periods, abbreviations, period-inside-quote all break exact extraction). How strict should the check be?
+A: Extract the full title and check its exact edges (precise, more false positives)
+
+## 28. LLM response
+
+You've chosen precise full-title extraction with exact edge checking. I'll build it to be as robust as I can within that approach, and I'll handle the period-inside-quote and internal-period cases as carefully as possible. Let me design the extraction and edge-check, then surface the residual false-positive risks clearly.
+
+First let me settle the config. Three modes the user described: no symbols, symmetrical (`"..."`), asymmetrical (`„..."`). The natural config is just a start symbol and an end symbol, with empty strings meaning "no symbols expected." Default start `"` (U+201C) and end `"` (U+201D). Let me verify those exact code points.Defaults are U+201C (“) start and U+201D (”) end. Now let me design the title extraction. The strategy for "exact edges":
+
+1. Get post-year text, strip the leading separator (`. ` or ` `).
+2. Extract the title segment. To handle the period-inside-quote case, I'll make extraction symbol-aware: if the title starts with the configured start symbol, the title runs until the matching end symbol (plus we tolerate a trailing period). Otherwise, fall back to "up to the first period followed by space."
+3. Check that the extracted title begins with the start symbol and ends with the end symbol.
+
+But there's a chicken-and-egg issue: I need to find the title to check its symbols, but symbol-aware extraction assumes the symbols are there. The clean resolution: extract the title region generously (year separator up to the journal boundary), then check its edges. Let me build a title extractor that's tolerant of a trailing period and internal periods by anchoring on the journal separator more intelligently. Let me prototype.This works well. The symbol-aware extraction handles the period-inside-quote case (`"A study."` extracted correctly through the closing quote), the asymmetrical user example, and the "no symbols" mode (where the truncated `A study of U.S` doesn't matter because we don't check edges). The missing-symbols case is correctly flagged.
+
+One more consideration: the "no symbols" mode. If start and end are both empty, the user wants to verify the title is *not* wrapped in symbols. But "no symbols" is ambiguous — should it flag a title that happens to have quotes? The user's option 1 is "No symbols: Smith (2026). A study of things." I think the cleanest interpretation: empty config means the check is **disabled** (don't check title symbols at all), rather than actively asserting absence. Let me confirm this interpretation with the design, since actively detecting "has unexpected symbols" is a different, harder check. I'll go with: empty start and end → check disabled. This matches the "presence-based, only flag clear violations" philosophy of the other checks.
+
+Now let me check whether the title might also be wrapped when symbols *are* configured but the entry has no clear title (e.g. a book like Hobbes). Let me handle the case where extraction yields something but no journal-period follows.This surfaces an important policy question: a book entry like Hobbes has an unquoted title, so under a `"`/`"` config it gets flagged as a violation. Is that correct? In APA, book titles are *italicized*, not quoted, while article titles are unquoted (in standard APA) — so a blanket "all titles must be quoted" check would wrongly flag books. But in plain text, italics are invisible anyway.
+
+Given the user's examples are all about article-style titles and the tool can't see italics, the honest behavior is: the check flags any entry whose title isn't wrapped in the configured symbols. That will flag books too. I'll document this clearly as a limitation rather than trying to detect book-vs-article (which isn't reliably possible from plain text). This is consistent with the "second opinion, may have false positives" framing and the user's explicit choice of the precise approach.
+
+Now let me implement. First the config keys in `config.yml`.Now add a title-extraction helper in `qdvcrc_parsing.py` (next to the other reference helpers), since it's parsing logic. Let me view the post-year helper location.Now the check function in `qdvcrc_analysis.py`. Let me add the import and the function.Now add the check function at the end of the analysis module.There's an edge case I should handle: a title that starts with the start symbol but the *end* symbol is missing (e.g. `"A study of things.` with no closing quote). In that case `extract_reference_title` won't find the end symbol, falls back to sentence-end extraction, and the result won't end with the end symbol — so it's correctly flagged. Let me verify this and other edge cases.All cases pass: correct titles pass, missing/partial symbols are flagged, books are flagged (documented limitation), and the no-symbols config disables the check. Let me also verify the symmetrical-quote case with period-inside-quote, and the asymmetrical user example.All three modes work. Now wire it into `check_refs.py`: defaults, config loading, and the call. Let me update `DEFAULT_CONFIG` and the orchestration.I should double-check the docstring comment above DEFAULT_CONFIG and update it, then update the imports and orchestration.There's a subtlety in `load_config`: it currently skips keys whose value is `None`, but for the title symbols an **empty string** is a meaningful value (means "disable check"). Empty string is falsy but not `None`, and the current loader checks `loaded[key] is not None`, so `""` will be correctly accepted. Let me verify that, since YAML empty values can parse as `None`.Good — `reflist_title_start_symbol: ""` parses as an empty string (accepted by the loader), while a bare `key:` parses as `None` (falls back to default). That's the right behavior: a user wanting "no symbols" writes `""` explicitly, which the loader keeps. Now update imports and orchestration in `check_refs.py`.Now update the module docstring's check list (add #8) and `print_report`. First the docstring.Also update the `check_citations` docstring that says "seven-section". Let me find it.Now `print_report`: extend the signature, docstring, defaults init, and add section 8. Let me view the current signature and docstring.Now view the docstring example and defaults init to extend them and add section 8 at the end.Now add the section 8 print block at the end. The wording needs to handle the "check disabled" case gracefully — when symbols are empty, the check returns no violations, so it'll show "None"; but the heading would show empty symbols. Let me make the heading sensible. Let me view the end of the print body.Now compile everything and run the full audit with the default config (curly quotes), plus the no-symbols and asymmetrical configs.Section 8 works under the default config: the unquoted Lee title is flagged, while the correctly-wrapped Smith title passes. Note the wording uses "and"/"&" separators matching config too — and the Smith entry uses `“...”` correctly. Now test the no-symbols (disabled) config and asymmetrical config.The no-symbols config correctly skips section 8 with a clear message. Config restored. Now let me verify backward compatibility of `print_report` (older calls without the new args) and check all trailing newlines.Backward compatibility holds (old call defaults title symbols to empty, skipping section 8 gracefully), and all files end with a blank line. The `qdvcrc_parsing.py` newline is OK too. Let me run one final comprehensive audit exercising all eight sections together to confirm no regressions.All eight sections work together correctly:
+- Section 5 flags the in-text `Brown & Lee` (config wants "and")
+- Section 7 flags the parenthetical `(3:1)` (config wants comma)
+- Section 8 flags the unquoted Mähring title (config wants curly quotes), while the two `“...”` titles pass
+
+No regressions. Now the docs. Let me update `docs/technical-info-from-claude.md`: intro list (#8), config section, new parsing helper row, new analysis function row, updated `print_report` and `check_citations` rows, and a maintenance note.Now add a maintenance note about the title-symbol check and its known limitations. Let me append after the volume/issue note.Now the README scope bullet. Let me add one for title symbols.Also the README mentions config in the usage prose — let me check it lists the configurable items and update if it enumerates them.The usage prose on line 21 enumerates the config items but stops at volume/issue. Let me add title symbols.Now final verification: compile, all newlines, and confirm config.yml still parses with the new keys.Everything compiles, `config.yml` loads with the two new keys (defaulting to the curly quotes U+201C/U+201D), and all eight files end with a blank line.
+
+I added a configurable title-symbol check. Per your choice, it uses precise full-title extraction and checks the exact edges. The two new config keys are `reflist_title_start_symbol` and `reflist_title_end_symbol`, defaulting to `“` and `”`. Setting both to `""` selects your "no symbols" option and disables the check (section 8 then prints "Skipped"). Symmetrical (`"..."`) and asymmetrical (`„..."`) styles both work by setting the two symbols accordingly.
+
+The extraction is symbol-aware: if the title opens with the start symbol it runs through the matching end symbol, which correctly handles a period sitting inside the closing quote (`"A study."`). It's reported as section 8 of the audit.
+
+Files changed: `config.yml` (two new keys), `qdvcrc_parsing.py` (`extract_reference_title` helper), `qdvcrc_analysis.py` (`find_title_symbol_violations`), `qdvcrc_report.py` (section 8, backward-compatible signature), `check_refs.py` (defaults, config wiring), plus `docs/technical-info-from-claude.md` and `README.md`.
+
+Two limitations I want to flag clearly, both consequences of the precise-extraction approach you chose:
+
+First, book entries (like the Hobbes example from earlier) get flagged when a symbol style is configured, because APA italicizes book titles rather than quoting them, and plain text can't show italics. So under the default curly-quote config, every book in a reference list will appear in section 8.
+
+Second, a title containing an internal sentence-ending period, or an unusual journal boundary, can be extracted imperfectly and produce a false flag. This is the "more false positives" trade-off inherent in exact edge checking.
+
+I wasn't able to run the final present_files call before hitting the tool limit, so the updated files are staged in the working directory but not yet re-presented. If you start a new turn I can present all eight files for download and run a final end-to-end audit to reconfirm everything.
+
+## 29. User request
+
+Continue
+
+## 30. LLM response
+
+Let me re-run a final end-to-end audit to reconfirm everything still works, then present all the files.All eight sections work correctly. Let me also confirm the full file inventory and that everything still compiles cleanly before presenting.Everything compiles and the audit confirms all eight sections work. Here are all the files changed in this title-symbol task.All seven changed files are attached above.
+
+To recap the title-symbol feature that's now complete:
+
+The two new config keys in `config.yml` are `reflist_title_start_symbol` and `reflist_title_end_symbol`, defaulting to `“` (U+201C) and `”` (U+201D). They support all three of your styles — symmetrical (`"`/`"`), asymmetrical (`„`/`“`), and no-symbols (both set to `""`, which disables the check and prints "Skipped" in section 8). The check extracts each reference's title with symbol-aware boundaries and flags any title that doesn't start and end with the configured symbols, reported as the new section 8 of the audit.
+
+The final audit above confirms all eight checks run together correctly. The two limitations I flagged earlier still stand and are documented in the maintenance notes: book entries get flagged under a symbol config (APA italicizes book titles, which plain text can't represent), and titles with internal sentence-ending periods can occasionally be extracted imperfectly — both accepted trade-offs of the precise-extraction approach you chose.

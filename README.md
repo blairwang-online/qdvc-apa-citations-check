@@ -18,7 +18,7 @@ python3 check_refs.py
 
 This will check `check_refs_document.txt` which you can create by just copy-pasting your manuscript from your word processor. Yes it is just plaintext .. ٩(◕‿◕｡)۶
 
-Citation-style preferences (in-text comma style, `and` vs `&` author separators for in-text and the reference list, and journal volume/issue format) are set in [`config.yml`](config.yml). Any setting you leave out falls back to a sensible default.
+Citation-style preferences (in-text comma style, `and` vs `&` author separators for in-text and the reference list, journal volume/issue format, and reference title symbols) are set in [`config.yml`](config.yml). Any setting you leave out falls back to a sensible default.
 
 ## Scope
 
@@ -30,6 +30,7 @@ What is checked:
 - Both parenthetical `(Smith 2020)` and narrative `Smith (2020)` in-line citations are recognised
 - Consistent author separators (`and` vs `&`), configurable separately for in-text citations and the reference list
 - Consistent journal volume/issue format (`Journal, 16(2)` vs `Journal (16:2)`) in the reference list
+- Consistent title symbols in the reference list (e.g. `“A study”`), with configurable start/end symbols
 
 What is not checked:
 

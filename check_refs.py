@@ -9,6 +9,7 @@ Audits a research paper (plain text) for APA citation consistency:
   5. Inline citations using the wrong author separator ("and" vs "&")
   6. Reference-list entries using the wrong author separator ("and" vs "&")
   7. Reference-list entries using the wrong journal volume/issue format
+  8. Reference-list entries whose title isn't wrapped in the configured symbols
 
 Style settings are read from config.yml (see DEFAULT_CONFIG for the keys and
 their defaults). Parsing, analysis, and reporting logic live in the qdvcrc_*
@@ -29,6 +30,7 @@ from qdvcrc_analysis import (
     find_intext_separator_violations,
     find_reference_separator_violations,
     find_volume_issue_violations,
+    find_title_symbol_violations,
 )
 from qdvcrc_report import print_report
 
@@ -40,11 +42,17 @@ from qdvcrc_report import print_report
 #   reflist_author_separator    -> "and" or "&" before the final reference author
 #   reflist_volume_issue_format -> "comma" for "Journal, 16(2)",
 #                                  "parenthetical" for "Journal (16:2)"
+#   reflist_title_start_symbol  -> symbol the title should start with ("" = no
+#                                  title-symbol check)
+#   reflist_title_end_symbol    -> symbol the title should end with ("" = no
+#                                  title-symbol check)
 DEFAULT_CONFIG = {
     'uses_comma_intext': False,
     'intext_author_separator': 'and',
     'reflist_author_separator': '&',
     'reflist_volume_issue_format': 'comma',
+    'reflist_title_start_symbol': '\u201c',
+    'reflist_title_end_symbol': '\u201d',
 }
 
 CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'config.yml')
@@ -92,7 +100,7 @@ def check_citations(file_path, config=None):
     Example:
         Input:  "paper.txt" (a file containing body text with (Author, Year)
                  citations and a References section)
-        Output (printed): the seven-section APA CITATION AUDIT REPORT
+        Output (printed): the eight-section APA CITATION AUDIT REPORT
     """
     if config is None:
         config = load_config()
@@ -101,6 +109,8 @@ def check_citations(file_path, config=None):
     intext_author_separator = config['intext_author_separator']
     reflist_author_separator = config['reflist_author_separator']
     reflist_volume_issue_format = config['reflist_volume_issue_format']
+    reflist_title_start_symbol = config['reflist_title_start_symbol']
+    reflist_title_end_symbol = config['reflist_title_end_symbol']
 
     lines = read_document(file_path)
     if lines is None:
@@ -131,6 +141,9 @@ def check_citations(file_path, config=None):
     volume_issue_violations = find_volume_issue_violations(
         raw_reference_list, reflist_volume_issue_format
     )
+    title_symbol_violations = find_title_symbol_violations(
+        raw_reference_list, reflist_title_start_symbol, reflist_title_end_symbol
+    )
 
     print_report(
         missing_in_references,
@@ -144,6 +157,9 @@ def check_citations(file_path, config=None):
         reflist_author_separator,
         volume_issue_violations,
         reflist_volume_issue_format,
+        title_symbol_violations,
+        reflist_title_start_symbol,
+        reflist_title_end_symbol,
     )
 
 

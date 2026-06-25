@@ -22,3 +22,15 @@ reflist_author_separator: "&"
 #   "comma"         -> Journal of Things, 16(2)   (volume, then issue in parens)
 #   "parenthetical" -> Journal of Things (16:2)   (volume:issue together in parens)
 reflist_volume_issue_format: "comma"
+
+# Symbols wrapping the TITLE in REFERENCE-LIST entries. Set the start and end
+# symbols your style uses; the checker flags titles not wrapped in them.
+#   No symbols:           Smith A (2026). A study of things. Journal
+#     -> set both to ""   (this disables the title-symbol check)
+#   Symmetrical symbols:  Smith A (2026). "A study of things". Journal
+#     -> start: '"'  end: '"'
+#   Asymmetrical symbols: Smith A (2026). „A study of things“. Journal
+#     -> start: "„"  end: "“"
+# Default: curly double quotes (U+201C / U+201D).
+reflist_title_start_symbol: "“"
+reflist_title_end_symbol: "”"
