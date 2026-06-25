@@ -23,7 +23,7 @@ INLINE_BRACKET_PATTERN = r'\[(.*?)\]|\((.*?)\)'
 REFERENCE_YEAR_PATTERN = re.compile(r'\(((?:19|20)\d{2})(?:,?\s*[^)]*)?\)')
 
 # Matches a 4-digit year (optionally suffixed, e.g. "2023a") anywhere in text
-YEAR_PATTERN = re.compile(r'\b(19\d{2}|20\d{2})[a-z]?\b')
+YEAR_PATTERN = re.compile(r'\b(16\d{2}|17\d{2}|18\d{2}|19\d{2}|20\d{2})[a-z]?\b')
 
 
 def extract_apa_keys_from_inline(cite_text):
