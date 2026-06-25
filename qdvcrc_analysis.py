@@ -53,6 +53,34 @@ _VOLUME_ISSUE_PATTERNS = {
     'parenthetical': (PARENTHETICAL_VOLUME_ISSUE_PATTERN, COMMA_VOLUME_ISSUE_PATTERN),
 }
 
+# Marks an edited-collection reference (book chapter), e.g. "... In: Smith (ed)
+# The Big Book ...". Matched as a whole word so it doesn't fire inside other
+# words, and only when followed by a space or colon.
+IN_CONTAINER_PATTERN = re.compile(r'\bIn:?\s')
+
+
+def is_article_or_chapter(post_year):
+    """
+    Returns True if the post-year text looks like a journal article or a book
+    chapter (a title followed by a separate container), rather than a whole
+    book. The signal is a recognizable container marker: a journal volume/issue
+    (either format) or an "In:" lead-in to an edited collection. Whole books,
+    which have neither, return False.
+
+    This is deliberately conservative: an article with no volume/issue and no
+    "In:" reads as a book and is treated as one, which only means its title
+    symbols aren't checked (the safe direction).
+
+    Example:
+        Input:  ". A study of things. Journal of Things, 16(2):100-110"
+        Output: True
+    """
+    return bool(
+        PARENTHETICAL_VOLUME_ISSUE_PATTERN.search(post_year)
+        or COMMA_VOLUME_ISSUE_PATTERN.search(post_year)
+        or IN_CONTAINER_PATTERN.search(post_year)
+    )
+
 # Latin letters that have no canonical Unicode decomposition into a base
 # letter plus a combining mark, so NFKD normalization alone can't reduce them
 # to ASCII. They are mapped to their conventional base form(s) explicitly so
@@ -350,25 +378,33 @@ def find_title_symbol_violations(raw_reference_list, start_symbol, end_symbol):
     disabled and nothing is flagged (the "no symbols" configuration). Entries
     with no detectable title (no year, or nothing after it) are skipped.
 
-    Note: this flags any title not wrapped in the symbols, including book
-    titles, which in APA are italicized rather than quoted; plain text can't
-    convey italics, so such entries will be reported when a symbol style is
-    configured.
+    Only journal articles and book chapters are checked. Whole books are
+    skipped: their titles are not wrapped in symbols in these styles (APA
+    italicizes them, which plain text can't convey), so checking them would
+    produce false positives. An entry counts as an article/chapter when it has
+    a container marker — a journal volume/issue or an "In:" lead-in — per
+    is_article_or_chapter; otherwise it is treated as a whole book.
 
     Example:
         Input:
             raw_reference_list = [
-                'Smith A (2026). “A study of things”. Journal of Things',
-                'Jones B (2025). An unquoted title. Journal of Stuff',
+                'Smith A (2026). “A study of things”. Journal of Things, 16(2)',
+                'Jones B (2025). An unquoted title. Journal of Stuff, 4(1)',
+                'Hobbes T (1651) Leviathan or The Matter. Project Gutenberg',
             ], "“", "”"
         Output:
-            ['Jones B (2025). An unquoted title. Journal of Stuff']
+            ['Jones B (2025). An unquoted title. Journal of Stuff, 4(1)']
     """
     if not start_symbol or not end_symbol:
         return []
 
     violations = []
     for ref in raw_reference_list:
+        post_year = get_reference_post_year(ref)
+        # Whole books aren't wrapped in title symbols in these styles, so only
+        # articles and chapters (which have a journal/container) are checked.
+        if not is_article_or_chapter(post_year):
+            continue
         title = extract_reference_title(ref, start_symbol, end_symbol)
         if not title:
             continue

@@ -537,3 +537,68 @@ To recap the title-symbol feature that's now complete:
 The two new config keys in `config.yml` are `reflist_title_start_symbol` and `reflist_title_end_symbol`, defaulting to `“` (U+201C) and `”` (U+201D). They support all three of your styles — symmetrical (`"`/`"`), asymmetrical (`„`/`“`), and no-symbols (both set to `""`, which disables the check and prints "Skipped" in section 8). The check extracts each reference's title with symbol-aware boundaries and flags any title that doesn't start and end with the configured symbols, reported as the new section 8 of the audit.
 
 The final audit above confirms all eight checks run together correctly. The two limitations I flagged earlier still stand and are documented in the maintenance notes: book entries get flagged under a symbol config (APA italicizes book titles, which plain text can't represent), and titles with internal sentence-ending periods can occasionally be extracted imperfectly — both accepted trade-offs of the precise-extraction approach you chose.
+
+## 31. User request
+
+The book limitation is a bit unfortunate. Could you modify the code to detect whether the title comes in two parts (hence it is a journal article or a book chapter) rather than in one part (hence a full book's title)? Then we only check for the start and end symbols in the former case but not the latter.
+
+## 32. LLM response
+
+Good idea — that's a clean way to distinguish them. Let me work out the heuristic precisely before coding it.
+
+The structure in these reference styles:
+- **Journal article / book chapter** (two parts after the year): `Title. Container` — e.g. `"A study". Journal of Things` or `Chapter title. In: Book Title`. The title is followed by another period-separated part (the journal/book it appears in).
+- **Whole book** (one part): `Title. Publisher, Place` — e.g. `Leviathan or The Matter. Project Gutenberg, Salt Lake City`.
+
+The tricky bit: both have a period after the title and more text after it. A book's title is *also* followed by publisher info. So "has something after the title" doesn't distinguish them. Let me look at real examples to find the actual distinguishing signal.Now I can see the real challenge. All three have the shape `Title. <more text>`. The distinguishing signal the user describes is "two parts vs one part." Let me think about what "part" means here concretely.
+
+The cleanest interpretation: count the period-delimited segments in the post-year text. A journal article / chapter has the title as its *own* segment followed by a *separate* container segment (`Title. Journal...`), so there are **two or more** period-separated segments. A whole book has `Title. Publisher, Place` — but that *also* has a period after the title.
+
+So a naive period count doesn't separate them either. Let me reconsider. The genuine difference in these formats: for articles/chapters, the part *after* the title is itself a substantial "container" (a journal name or "In: ..."). For a book, the part after the title is publisher/place info, typically comma-separated rather than its own period-terminated sentence.
+
+Let me test whether "is there a second period-terminated segment (i.e. another period after the title's period)" distinguishes them.This is the crux of the difficulty, and it shows the period-count heuristic doesn't cleanly work: a whole book (`Title. Publisher, Place`) produces **2 segments**, exactly like a journal article (`Title. Journal...`). And a book with a period in its subtitle produces 3. So counting period-delimited parts conflates books and articles.
+
+The actual signal the user is pointing at — "title in two parts" — I think refers to the visual structure where the title is one discrete part and there's a *distinct container* (journal/book) as a second part. But structurally `Title. Publisher` and `Title. Journal` look identical to a parser. The thing that genuinely differs is *semantic* (is the second part a journal/container vs a publisher), which plain text doesn't reliably mark.
+
+There's one structural signal that does help for the most common case: a **journal article** typically has a volume/issue (the `16(2)` or `(16:2)` we already detect), and a **book chapter** typically has `In:` / `In ` before the container. Whole books usually have neither. Let me test whether "has a volume/issue OR has an 'In:' marker" cleanly identifies article-or-chapter.This works for the clear cases: articles with volume/issue and chapters with "In:" are correctly identified, while whole books are correctly excluded. The one miss is "journal no vol/issue" (an editorial in Nature with no volume) — it's misclassified as a book. That's an acceptable edge case (an article without a volume/issue is genuinely hard to distinguish from a book by structure alone, and it errs toward *not* flagging, which is the safe direction the user wants).
+
+But the user framed it specifically as "two parts vs one part." Let me reconsider whether there's a more direct structural reading that better matches their mental model, combining it with these signals. The user's examples were `"A study of things". Journal of Things` — title part + container part. A book is just `Title` then publisher. 
+
+The most faithful implementation of "two parts" that avoids the book false-positive: a reference is article/chapter-like (title should be checked for symbols) when there's a recognizable **container** after the title — signaled by a volume/issue, an `In:` marker, or page numbers (`pp` / `:462-496`). Let me check whether adding page-range detection improves coverage of the "journal without volume" case.Adding page detection catches the "journal pages only" case, but it introduces a false positive: a book whose title contains a year range like `A History 1900-2000` gets misclassified as having a container (a "page range"). That's a real risk since book titles with date ranges are common.
+
+So there's a genuine trade-off between the two signals. This is a design decision I should put to you, since the user's framing ("two parts vs one part") is conceptual and the implementation has to pick concrete signals with different false-positive profiles.
+
+## 33. User request
+
+Q: To tell an article/chapter (check title symbols) from a whole book (skip), I need a structural signal. A book title like 'Leviathan. Publisher' looks just like 'Title. Journal' to a parser. Which signal should mark something as an article/chapter?
+A: Volume/issue or 'In:' marker (safest — won't misread book titles)
+
+## 34. LLM response
+
+The safest signal: a reference is treated as an article/chapter (so its title symbols get checked) only when it has a volume/issue or an "In:" marker. Otherwise it's treated as a whole book and the title-symbol check is skipped. This won't misread book titles.
+
+Let me add a helper to detect this. It belongs in `qdvcrc_analysis.py` since it uses the volume/issue patterns already defined there. First let me view where the title-symbol check and volume/issue patterns sit.Now update `find_title_symbol_violations` to skip whole-book entries. It needs the post-year text to call `is_article_or_chapter` — I'll import `get_reference_post_year` (already imported) and use it. Let me view the current function.Now I'll update both the docstring (replace the book-limitation note with the new behavior) and the loop (skip whole books).Now test the new behavior thoroughly — the book should now be skipped, articles/chapters still checked.All cases behave correctly now:
+- Correctly-quoted articles pass
+- Unquoted articles and chapters are flagged
+- **Whole books are skipped** — no more false positives on books
+
+Now a full end-to-end audit including a book, to confirm the report behaves.Section 8 now flags only the unquoted article — the Hobbes book is correctly skipped, and the properly-quoted Smith article passes. The book limitation is resolved.
+
+Let me run the broader regression (all eight sections together) and verify compile + trailing newlines.Everything works. The Hobbes book is now excluded from section 8 (it was previously flagged), while the unquoted Mähring article is still correctly caught. Section 7 still flags the parenthetical volume/issue independently. Compiles cleanly and files end with a blank line.
+
+Now let me update the docs. The maintenance note about the book limitation needs revising, and I should add a row for the new `is_article_or_chapter` helper. Let me find them.Now update the maintenance note to replace the book-limitation text with the new behavior.The README's title-symbol bullet is high-level and doesn't mention the book caveat, so it stays accurate. Let me do a final compile and newline check, then present.Both compile and end with a blank line.
+
+The fix distinguishes articles/chapters from whole books using a container marker. Per your choice, an entry is treated as an article or chapter — and therefore has its title checked for symbols — only when it has a journal volume/issue (either format) or an "In:" lead-in to an edited collection. Whole books have neither, so they're skipped, eliminating the false positives on book titles.
+
+I added an `is_article_or_chapter` helper that `find_title_symbol_violations` now consults before checking each entry. The approach is conservative: an article that happens to have no volume/issue and no "In:" marker will read as a book and be skipped, which is the safe direction (it won't wrongly flag) — that's the trade-off of choosing the signal that never misreads book titles.
+
+**Files changed:**
+- `qdvcrc_analysis.py` — added the `IN_CONTAINER_PATTERN`, the `is_article_or_chapter` helper, and the book-skip in `find_title_symbol_violations`.
+- `docs/technical-info-from-claude.md` — added the helper row, updated the title-symbol function row, and revised the maintenance note.
+
+Both end with a blank line; no markdown was reflowed.Both updated files are attached above.
+
+The book limitation is now resolved: whole books are skipped in the title-symbol check, so a reference like `Hobbes T (1651) Leviathan or The Matter. Project Gutenberg, Salt Lake City` no longer gets falsely flagged, while journal articles and book chapters are still checked as before.
+
+One residual behavior worth keeping in mind, since it's the flip side of choosing the safest signal: an article or chapter that has *neither* a volume/issue *nor* an "In:" marker — for example an online-only article cited as just `Author (Year). Title. Website` — will be treated as a book and skipped, so its title symbols won't be checked. That errs toward silence rather than false alarms, which matches what you asked for. If you later find you want those caught too, adding page-range detection as an additional signal would do it, at the cost of the `A History 1900-2000`-style book-title risk I mentioned earlier.
+
