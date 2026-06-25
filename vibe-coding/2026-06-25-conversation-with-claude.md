@@ -141,3 +141,34 @@ The accented-letter range I used (`À-ÖØ-Þ`) covers Western European names (�
 
 Also, the existing apostrophe case (e.g. "O'Brien") splits into two tokens; that was already true before this change, so it's not a regression, but it's a related gap if you have any such names.
 
+## 9. User request
+
+The following was marked as "references in list with no corresponding inline citation" (false positive):
+
+In-line text: "Some claim was made, according to Liesenfeld and Dingemanse (2024)"
+
+References list entry: Liesenfeld A, Dingemanse M (2024) Rethinking open source generative AI: open washing and the EU AI Act. In:  Proceedings of the ACM Conference on Fairness, Accountability, and Transparency. pp 1774-1787. doi:10.1145/3630106.3659005
+
+## 10. LLM response
+
+Let me reproduce this one.Found it. This is a **narrative citation** (also called a parenthetical-year citation): the author names sit in the running prose and only the year is in parentheses — `Liesenfeld and Dingemanse (2024)`.
+
+The parser only looks *inside* brackets (`INLINE_BRACKET_PATTERN` grabs everything in `()` or `[]`). So it extracts just `2024`, with no author, and produces no key. The reference correctly produces `Liesenfeld`/`Dingemanse` keys, but there's nothing on the inline side to match — hence the false "unused reference."
+
+This is a genuinely different citation form from what the tool handles. Let me look at the current extraction flow and confirm the scope before designing a fix, because narrative citations need the author names that precede the parenthesized year.I understand the structure. The fix needs to detect the narrative form: when a parenthesis contains *only* a year (and optional letter suffix, e.g. `2024`, `2024a`), the author names are the words immediately preceding the `(`. I need to pull those names from the prose and combine them with the year into a citation string the existing key-extractor can consume.
+
+This is a meaningful behavior change, so let me design it carefully. There's a real ambiguity: how far back to read author names from the prose. In `Liesenfeld and Dingemanse (2024)` it's two names joined by "and". But in `...according to Liesenfeld and Dingemanse (2024)` the preceding words include "according to" — lowercase words that aren't names. The existing `AUTHOR_NAME_PATTERN` requires an uppercase initial, so lowercase connector words like "according"/"to" are naturally excluded, and "and" is already filtered by `extract_apa_keys_from_inline`. Let me verify what the preceding-text capture would yield.This surfaces the core difficulty: naively grabbing all capitalized words before the year picks up sentence-initial words ("Some", "As", "This", "Earlier") and other capitalized prose ("The framework"), which would create false author keys. I need a tighter rule: capture only the **contiguous run of name tokens immediately adjacent** to the `(`, where the run consists of capitalized names connected by `and`/`&`/`,`. The moment a lowercase non-connector word (like "to", "by") appears, the run stops.
+
+Let me build and test that adjacency-based capture.This is much better. The adjacency rule correctly captures `Liesenfeld and Dingemanse`, `Smith`, `Smith and Jones`, and `Smith, Jones, and Lee`, while stopping at lowercase connectors like "by"/"to".
+
+But notice the `The Mähring framework (2008)` case returns `None` — because "framework" (lowercase) breaks the run, so "Mähring" isn't adjacent to the paren. That's actually the *safe* behavior: we'd rather miss an unusual narrative phrasing than invent a false author from arbitrary capitalized prose. However, this also reveals the central risk of this feature: **any** capitalized word sitting right before a year-in-parens will be treated as an author. Consider "...in Section 3 (2024)" or "...the Treaty (2019)". Let me probe these false-positive risks before committing.Reassuring: most risky cases return `None` because a lowercase word ("pandemic", "sharply", "product") sits between the capitalized word and the paren. Only "see the Treaty (2019)" produces a spurious `Treaty` — i.e., a capitalized common noun directly before a year-paren. That's a narrow residual risk.
+
+This is now a design decision with a real trade-off, and the behavior change is more consequential than the previous fixes. I should check what you want rather than assume.
+
+## 11. User request
+
+Q: Narrative citations like 'Liesenfeld and Dingemanse (2024)' put author names in the prose, not the brackets. Supporting them means reading capitalized words before a year-in-parens as authors — which can occasionally misread a capitalized noun (e.g. 'the Treaty (2019)') as an author. Do you want me to add narrative-citation support?
+A: Yes — match against the reference list (best for catching real ones)
+
+## 12. LLM response
+

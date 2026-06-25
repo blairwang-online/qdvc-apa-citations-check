@@ -47,15 +47,21 @@ def check_citations(file_path):
     if lines is None:
         return
 
-    raw_reference_list, references_by_key, raw_inline_citations, citations_by_key = (
-        parse_document(lines, whitelist)
-    )
+    (
+        raw_reference_list,
+        references_by_key,
+        raw_inline_citations,
+        citations_by_key,
+        narrative_citations,
+    ) = parse_document(lines, whitelist)
 
     missing_in_references, used_reference_entries = find_missing_and_used_references(
         raw_inline_citations, references_by_key
     )
     unused_references = find_unused_references(raw_reference_list, used_reference_entries)
-    style_violations = find_style_violations(raw_inline_citations, USES_COMMA_INTEXT)
+    style_violations = find_style_violations(
+        raw_inline_citations, USES_COMMA_INTEXT, narrative_citations
+    )
     order_violations = find_reference_order_violations(raw_reference_list)
 
     print_report(

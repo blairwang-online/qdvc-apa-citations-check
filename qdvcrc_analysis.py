@@ -89,10 +89,15 @@ def find_unused_references(raw_reference_list, used_reference_entries):
     return [ref for ref in raw_reference_list if ref not in used_reference_entries]
 
 
-def find_style_violations(raw_inline_citations, uses_comma_intext):
+def find_style_violations(raw_inline_citations, uses_comma_intext,
+                          narrative_citations=None):
     """
     Returns a sorted list of inline citations that don't conform to the
-    given comma style.
+    given comma style. Narrative (in-prose) citations such as
+    "Liesenfeld and Dingemanse 2024" are excluded, because the comma-style
+    convention only applies to fully parenthetical citations; a narrative
+    citation never has a comma before its parenthesized year regardless of
+    the configured style.
 
     Example:
         Input:
@@ -103,10 +108,13 @@ def find_style_violations(raw_inline_citations, uses_comma_intext):
         Output:
             ["Jones 2024"]
     """
+    narrative_citations = narrative_citations or set()
     violations = [
         raw_cite
         for raw_cite, keys in raw_inline_citations.items()
-        if keys and not matches_intext_style(raw_cite, uses_comma_intext)
+        if keys
+        and raw_cite not in narrative_citations
+        and not matches_intext_style(raw_cite, uses_comma_intext)
     ]
     return sorted(violations)
 

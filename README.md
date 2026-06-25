@@ -17,6 +17,7 @@ What is checked:
 - In-line APA citations have matching entries in reference list
 - Reference list entries have matching in-line APA citations
 - In-line citations in appendix material (after the reference list) are checked too
+- Both parenthetical `(Smith 2020)` and narrative `Smith (2020)` in-line citations are recognised
 
 What is not checked:
 

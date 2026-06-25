@@ -33,6 +33,26 @@ AUTHOR_NAME_PATTERN = re.compile(
     r'\b[A-ZÀ-ÖØ-Þ][^\W\d_\s\-]+(?:-[^\W\d_\s]+)*'
 )
 
+# Matches a parenthesis containing only a year (optionally letter-suffixed),
+# e.g. "(2024)" or "(2024a)" -> captures "2024". Used to detect narrative
+# citations such as "Liesenfeld and Dingemanse (2024)", where the author
+# names sit in the running prose rather than inside the brackets.
+NARRATIVE_YEAR_PATTERN = re.compile(
+    r'\(((?:16|17|18|19|20)\d{2})[a-z]?\)'
+)
+
+# Matches the contiguous run of author tokens immediately preceding a
+# narrative year parenthesis: capitalized names (ASCII or accented) joined by
+# spaces, commas, "and", "&", "et", or "al." The run is anchored to the end of
+# the pre-parenthesis text, so lowercase lead-in words ("according to", "by")
+# stop the match and aren't mistaken for authors.
+_NARRATIVE_NAME = r'[A-ZÀ-ÖØ-Þ][\w.\'-]*'
+_NARRATIVE_CONNECTOR = r'(?:and|&|et|al\.?)'
+NARRATIVE_AUTHORS_PATTERN = re.compile(
+    r'((?:' + _NARRATIVE_NAME + r'|' + _NARRATIVE_CONNECTOR + r')'
+    r'(?:[\s,]+(?:' + _NARRATIVE_NAME + r'|' + _NARRATIVE_CONNECTOR + r'))*)\s*$'
+)
+
 
 def extract_apa_keys_from_inline(cite_text):
     """
@@ -85,11 +105,51 @@ def extract_reference_keys(line):
     return prepared_return
 
 
+def extract_narrative_citations(line):
+    """
+    Finds narrative (in-prose) citations, where author names appear in the
+    running text and only the year is parenthesized, e.g.
+    "Liesenfeld and Dingemanse (2024)". Returns a list of synthesized citation
+    strings of the form "<authors> <year>" that downstream key extraction can
+    consume the same way as a bracketed citation.
+
+    The authors are taken from the contiguous run of capitalized name tokens
+    immediately preceding the year parenthesis, so lowercase lead-in words
+    ("according to", "by") are not mistaken for authors. A parenthesis with no
+    such preceding name run (e.g. "the Treaty was signed (2019)") yields
+    nothing.
+
+    Example:
+        Input:  "As shown by Liesenfeld and Dingemanse (2024), this holds."
+        Output: ["Liesenfeld and Dingemanse 2024"]
+    """
+    narrative_cites = []
+    for match in NARRATIVE_YEAR_PATTERN.finditer(line):
+        year = match.group(1)
+        preceding_text = line[:match.start()].rstrip()
+        authors_match = NARRATIVE_AUTHORS_PATTERN.search(preceding_text)
+        if not authors_match:
+            continue
+        authors = authors_match.group(1).strip()
+        narrative_cites.append(f"{authors} {year}")
+    return narrative_cites
+
+
 def extract_inline_citations(line, whitelist):
     """
     Given a stripped line of body/appendix text, returns the list of
-    cleaned, individual inline citation strings found inside [] or (),
-    split on ';' for multi-citation brackets, and filtered by whitelist.
+    cleaned, individual inline citation strings found in the line, filtered
+    by whitelist. Two forms are recognized:
+
+      - Bracketed citations inside [] or (), split on ';' for multi-citation
+        brackets, e.g. "(Smith, 2026; Jones 2024)".
+      - Narrative citations, where the authors are in the prose and only the
+        year is parenthesized, e.g. "Liesenfeld and Dingemanse (2024)". These
+        are returned as synthesized "<authors> <year>" strings.
+
+    A parenthesis that contains only a year is treated as the year half of a
+    narrative citation rather than a bracketed citation, so it is not emitted
+    as a bare "2024" cite.
 
     Example:
         Input:  "This is shown elsewhere (Smith, 2026; Jones 2024).", {}
@@ -102,8 +162,17 @@ def extract_inline_citations(line, whitelist):
             continue
         for cite in raw_cite.split(';'):
             clean_cite = cite.strip()
+            # A year-only parenthesis is the year half of a narrative citation
+            # (handled below), not a bracketed citation in its own right.
+            if NARRATIVE_YEAR_PATTERN.fullmatch(f"({clean_cite})"):
+                continue
             if clean_cite and clean_cite not in whitelist:
                 cites.append(clean_cite)
+
+    for narrative_cite in extract_narrative_citations(line):
+        if narrative_cite not in whitelist:
+            cites.append(narrative_cite)
+
     return cites
 
 
@@ -133,6 +202,10 @@ def parse_document(lines, whitelist):
       - references_by_key: {(author, year): [reference lines]}
       - raw_inline_citations: {raw inline citation text: [(author, year), ...]}
       - citations_by_key: {(author, year): [raw inline citation text, ...]}
+      - narrative_citations: {raw inline citation text} for the subset that are
+        narrative (in-prose) citations, e.g. "Liesenfeld and Dingemanse 2024".
+        These are excluded from the comma-style check, which only applies to
+        parenthetical citations.
 
     Example:
         Input:
@@ -147,12 +220,14 @@ def parse_document(lines, whitelist):
                 {("Smith", "2026"): ["Smith, J. (2026). A study of things."]},
                 {"Smith, 2026": [("Smith", "2026")]},
                 {("Smith", "2026"): ["Smith, 2026"]},
+                set(),
             )
     """
     raw_reference_list = []
     references_by_key = {}
     raw_inline_citations = {}
     citations_by_key = {}
+    narrative_citations = set()
 
     current_section = "text"
 
@@ -176,10 +251,18 @@ def parse_document(lines, whitelist):
         elif current_section in ("text", "appendix"):
             # Body text and appendix material are both scanned for inline
             # citations and matched against the reference list the same way.
+            line_narrative = set(extract_narrative_citations(stripped_line))
+            narrative_citations.update(line_narrative)
             for clean_cite in extract_inline_citations(stripped_line, whitelist):
                 keys = extract_apa_keys_from_inline(clean_cite)
                 for key in keys:
                     citations_by_key.setdefault(key, []).append(clean_cite)
                 raw_inline_citations[clean_cite] = keys
 
-    return raw_reference_list, references_by_key, raw_inline_citations, citations_by_key
+    return (
+        raw_reference_list,
+        references_by_key,
+        raw_inline_citations,
+        citations_by_key,
+        narrative_citations,
+    )
